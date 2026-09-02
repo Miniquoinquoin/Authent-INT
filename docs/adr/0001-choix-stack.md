@@ -15,8 +15,8 @@ When working with Claude Code, point it at a specific section rather than the
 whole file:
 
 ```
-Read IMPLEMENTATION_PLAN.md §6 (Data model) and §7 (Endpoints),
-then scaffold the Prisma schema for the OAuth state tables only.
+Read docs/adr/0001-choix-stack.md §6 (Data model) and §7 (Endpoints),
+then scaffold the SQLAlchemy models for the OAuth state tables only.
 ```
 
 Anything marked **[À VALIDER]** is a question for the client, not a decision we
@@ -51,14 +51,15 @@ management** — which is exactly where real-world IdP vulnerabilities live.
 | RFC 6750 | Bearer token usage |
 | RFC 7636 | PKCE (mandatory for all clients) |
 | RFC 7009 | Token revocation |
-| RFC 7662 | Token introspection |
+| RFC 7662 | Token introspection — **deferred**, see §7 |
 | RFC 8414 | Authorization Server Metadata |
 | RFC 9700 (BCP) | OAuth 2.0 Security Best Current Practice |
 | OIDC Core 1.0 | ID tokens, UserInfo, `sub` semantics |
 | OIDC Discovery 1.0 | `/.well-known/openid-configuration` |
 | OIDC RP-Initiated Logout | `/end-session` |
 
-Target conformance profile: **Basic OP** + **Config OP** (see §17).
+Target conformance profile: **Basic OP** + **Config OP** (see §13). Conformance
+is validated **last** (§16) — it cannot pass until every brick is wired.
 
 ---
 
@@ -67,43 +68,78 @@ Target conformance profile: **Basic OP** + **Config OP** (see §17).
 Everything runs in Docker. One external entry point; every backing service binds
 internally only.
 
+```mermaid
+---
+config:
+  look: handDrawn
+  theme: neutral
+---
+flowchart TD
+    browser([Navigateur])
+
+    subgraph edge[" "]
+        caddy["caddy<br/>TLS, :443"]
+    end
+
+    subgraph front["Frontends (static builds)"]
+        authfe["auth-frontend<br/><i>login UI</i>"]
+        portalfe["portal-frontend<br/><i>page d'accueil</i>"]
+    end
+
+    subgraph core["Coeur"]
+        authsrv["auth-server<br/><b>the IdP</b>"]
+    end
+
+    subgraph rs["Resource Servers (mocks)"]
+        impots["svc-impots"]
+        cadastre["svc-cadastre"]
+    end
+
+    subgraph state["State"]
+        pg[("postgres:16<br/><i>durable</i>")]
+        vk[("valkey<br/><i>ephemeral</i>")]
+    end
+
+    subgraph fixtures["Fixtures (dev only)"]
+        mail["mailpit<br/>SMTP"]
+        ldap["openldap<br/>profile: ldap"]
+    end
+
+    browser -->|https| caddy
+    caddy --> authfe
+    caddy --> portalfe
+    caddy --> authsrv
+    caddy --> impots
+    caddy --> cadastre
+
+    authsrv --> pg
+    authsrv --> vk
+    authsrv -->|SMTP| mail
+    sync["sync job<br/><i>CronJob</i>"] -->|LDAPS, read-only| ldap
+    sync --> pg
+
+    impots -.->|JWKS| authsrv
+    cadastre -.->|JWKS| authsrv
+
+    classDef ephemeral stroke-dasharray: 5 5
+    class vk,mail,ldap ephemeral
 ```
-                    ┌──────────────────────────┐
-   browser ────────▶│  caddy (TLS, :443)       │
-                    └────┬────────┬────────┬───┘
-                         │        │        │
-        ┌────────────────┘        │        └────────────────┐
-        ▼                         ▼                         ▼
-┌───────────────┐        ┌────────────────┐        ┌────────────────┐
-│ auth-frontend │        │  auth-server   │        │ portal-frontend│
-│ (login UI)    │        │  (the IdP)     │        │ (page d'accueil)│
-└───────────────┘        └───┬────────┬───┘        └────────────────┘
-                             │        │
-              ┌──────────────┘        └──────────────┐
-              ▼                                      ▼
-     ┌─────────────────┐                    ┌─────────────────┐
-     │  postgres:16    │                    │  valkey (cache) │
-     └─────────────────┘                    └─────────────────┘
-              │
-              ▼
-     ┌─────────────────┐   ┌──────────────┐   ┌──────────────────┐
-     │ mailpit (SMTP)  │   │ svc-impots   │   │ svc-cadastre     │
-     │ dev only        │   │ (mock RS)    │   │ (mock RS)        │
-     └─────────────────┘   └──────────────┘   └──────────────────┘
-```
+
+Dotted edges are JWKS fetches: the mock services validate tokens locally against
+cached public keys, never calling back per request (§11).
 
 | Container | Role | Image / base |
 | --- | --- | --- |
 | `caddy` | TLS termination, single ingress, routes by host | `caddy:2-alpine` |
-| `auth-server` | The OpenID Provider. All protocol + admin endpoints | Node 22 (built) |
+| `auth-server` | The OpenID Provider. All protocol + admin endpoints | Python 3.13 (built), `uvicorn` |
 | `auth-frontend` | Login, MFA, consent, activation, reset UI | `caddy:2-alpine` serving Vite build |
 | `portal-frontend` | *Page d'accueil* listing services per role | `caddy:2-alpine` serving Vite build |
-| `svc-impots`, `svc-cadastre`, … | **Mocked** services (brief: *services externes à mocker*) | small Fastify apps |
+| `svc-impots`, `svc-cadastre`, … | **Mocked** services (brief: *services externes à mocker*) | small FastAPI apps |
 | `postgres` | Single source of truth for identity state | `postgres:16-alpine` |
 | `valkey` | OTP storage, rate limit counters, session index | `valkey/valkey:8-alpine` |
 | `mailpit` | Dev SMTP catcher for A2F + activation mails | `axllent/mailpit` |
 | `openldap` | **Test fixture only** — stands in for the client's directory. Compose profile `ldap`, never deployed | see §5b |
-| `conformance-suite` | OIDF tests, separate compose profile | see §17 |
+| `conformance-suite` | OIDF tests — **not ours**, cloned separately with its own compose file | see §13 |
 
 **Networking rules**
 - Only `caddy` publishes ports to the host.
@@ -115,8 +151,8 @@ internally only.
 
 Not for load balancing — for **issuer identity**. Three things must agree
 byte-for-byte: the `iss` claim, the Discovery document, and the URL the
-conformance suite hits. Without a proxy, the browser sees `localhost:3000` while
-containers see `auth-server:3000`, and you patch around that mismatch for the
+conformance suite hits. Without a proxy, the browser sees `localhost:8000` while
+containers see `auth-server:8000`, and you patch around that mismatch for the
 rest of the project. Secondary reasons: TLS terminated once instead of in five
 services, and correct cookie scoping (on bare `localhost`, cookies ignore the
 port, so the SSO cookie leaks across every service — it appears to work locally
@@ -132,7 +168,7 @@ edge config is:
 ```caddyfile
 auth.authentint.local {
     tls internal
-    reverse_proxy auth-server:3000
+    reverse_proxy auth-server:8000
 }
 
 login.authentint.local {
@@ -147,7 +183,7 @@ portal.authentint.local {
 
 impots.authentint.local {
     tls internal
-    reverse_proxy svc-impots:4000
+    reverse_proxy svc-impots:8001
 }
 ```
 
@@ -174,40 +210,63 @@ about. It also mirrors how Ory Hydra separates the login/consent app.
 
 ## 3. Tech stack
 
-### Recommended
+### Decision — locked
+
+**Backend is Python.** The team is stronger in Python.
 
 | Layer | Choice | Rationale |
 | --- | --- | --- |
-| Language | **TypeScript** (Node 22) | Strong typing on token/claim shapes; best OIDC library ecosystem for learning |
-| HTTP | **Fastify** | Fast, schema-first validation (JSON Schema per route) |
-| ORM / migrations | **Prisma** | Declarative schema = a real deliverable (*schéma de BDD*) |
-| JOSE | **`jose`** (panva) | The reference JS JOSE implementation; JWT sign/verify, JWKS |
-| Password hashing | **`@node-rs/argon2`** | Argon2id, native speed |
-| Validation | **`zod`** | Runtime validation of every protocol parameter |
-| Frontend | **React + Vite + TypeScript** | Fast dev loop; two separate SPA builds |
+| Language | **Python 3.13** | Team fluency. 3.13 rather than 3.14 because `argon2-cffi`, `asyncpg` and the LDAP clients ship wheels for it today — no source builds in the image |
+| HTTP | **FastAPI** (`uvicorn`) | Schema-first validation per route, same shape as Fastify's JSON Schema; emits OpenAPI for free — the frontends generate their types from it (§4) |
+| ORM / migrations | **SQLAlchemy 2.0** + **Alembic** | Typed models; versioned migrations are a real deliverable (*schéma de BDD*) |
+| JOSE | **`joserfc`** | Maintained by the `authlib` author, tracks the RFCs closely; JWT sign/verify, JWKS |
+| Password hashing | **`argon2-cffi`** | Argon2id, binding to the reference C implementation |
+| Validation | **Pydantic v2** | Runtime validation of every protocol parameter; the Rust core keeps it cheap enough to sit on the hot path |
+| Frontend | **React + Vite + TypeScript** | Unchanged — the frontends talk HTTP, the backend language does not reach them |
 | Styling | Tailwind or plain CSS modules | Team preference |
-| Tests | **Vitest** + **Supertest**, **Playwright** (e2e) | |
+| Tests | **pytest** + **httpx** `ASGITransport`, **Playwright** (e2e) | |
 | Load testing | **k6** | Scripts the *pics fiscaux* scenario |
-| Observability | **OpenTelemetry** → Prometheus + Grafana + Loki | Needed to defend the resilience claim |
+| Observability | **structured JSON logs** + `/metrics` (Prometheus format) | The *montée en charge* evidence is the k6 report, which k6 produces itself |
 
-### Viable alternatives
+**Not a full observability stack.** OpenTelemetry → Prometheus + Grafana + Loki
+was the previous entry: three extra containers, no brick of its own in §16, and
+nothing in §18 that needs them. `/metrics` in the Prometheus text format costs one
+dependency and means the client's cluster can scrape us if it already runs
+Prometheus. Add collectors the day someone asks for a dashboard.
 
-- **Python**: FastAPI + SQLAlchemy + Alembic + `joserfc` + `argon2-cffi`.
-  Pick this if the team is stronger in Python. `authlib` can supply grant
-  plumbing if you want a middle path.
+**Two consequences worth stating up front:**
+
+1. **Argon2id runs in the GIL-bound process.** §11.3 already flags hashing as the
+   login-rate bottleneck; in Python it also blocks the event loop. Every
+   `verify()` and `hash()` call goes through `run_in_executor` / a thread pool —
+   decide this on day one, not after the k6 run.
+2. **`sub`, claim and token shapes are Pydantic models, not hand-built dicts.**
+   That is what buys back the typing rationale we lose with the language change;
+   §5's ID token and §8's authorization-code state are model definitions.
+
+### Viable alternatives (rejected)
+
+- **TypeScript** (Node 22): Fastify + Prisma + `jose` + `@node-rs/argon2` + `zod`.
+  The prior recommendation. Marginally better JOSE ecosystem and no GIL caveat,
+  rejected on team fluency.
 - **Java**: Spring Boot + Spring Authorization Server. Closest to what a real
   French public-sector project would ship, but the framework does so much that
   you learn less about the protocol.
 - **Go**: excellent for the scaling story, weaker library ergonomics for
   building an AS from scratch.
 
-**[À VALIDER — équipe]** Lock the language in session 1. Do not revisit.
-
 ### Deliberately not used
 
+**`authlib`, `python-oauth2-provider`**, and on the other side of the fence
 `node-oidc-provider`, Keycloak, Hydra, Authentik — these *are* the thing we're
-building. They remain useful as **reference implementations to read** when a
-spec detail is ambiguous.
+building. `authlib` deserves the explicit mention: it is the obvious Python
+reflex, its grant plumbing is exactly §8, and adopting it would hollow out the
+project. They remain useful as **reference implementations to read** when a spec
+detail is ambiguous.
+
+`joserfc` is the one library from that author we *do* take — JOSE primitives are
+in the "we do NOT write" column of §1. The line is: cryptography and
+serialisation, yes; grant and `/authorize` state machines, no.
 
 ---
 
@@ -216,15 +275,15 @@ spec detail is ambiguous.
 ```
 authentint/
 ├── README.md                    # brief + fonctionnalités (livrable)
-├── IMPLEMENTATION_PLAN.md       # this file
 ├── docker-compose.yml           # dev stack
 ├── docker-compose.conformance.yml
 ├── .env.example
 ├── docs/
+│   ├── adr/0001-choix-stack.md  # this file
 │   ├── architecture.md
-│   ├── db-schema.md             # livrable
-│   ├── api-endpoints.md         # livrable
 │   ├── threat-model.md
+│   ├── generated/               # db-schema.md + api-endpoints.md (livrables),
+│   │                            # emitted by `make docs` — never hand-edited
 │   └── conformance-results/     # OIDF exports
 ├── apps/
 │   ├── auth-server/
@@ -235,18 +294,27 @@ authentint/
 │   │   │   ├── domain/          # entities, scope resolution
 │   │   │   ├── infra/           # db, cache, mailer, keystore
 │   │   │   └── audit/
-│   │   ├── prisma/schema.prisma
-│   │   └── test/
-│   ├── auth-frontend/
-│   ├── portal-frontend/
+│   │   ├── alembic/             # versioned migrations (livrable)
+│   │   ├── pyproject.toml
+│   │   └── tests/
+│   ├── auth-frontend/           # `npm run gen:api` → src/api/types.ts
+│   ├── portal-frontend/         # same, from the same OpenAPI schema
 │   └── mock-services/
-├── packages/
-│   └── shared-types/            # claim & scope types shared FE/BE
 ├── k8s/                         # manifests / Helm chart
 ├── fixtures/
 │   └── ldap/                    # LDIF seed data for the OpenLDAP test fixture
 └── load/                        # k6 scripts
 ```
+
+**No `packages/` workspace.** The backend is Python, so the only cross-app
+artefact is the TypeScript type file generated from the auth-server OpenAPI
+schema by `openapi-typescript`. Each frontend generates its own copy in its own
+build; a monorepo workspace to share one generated file earns nothing.
+
+**`db-schema.md` and `api-endpoints.md` are generated, not written.** They are
+client deliverables, but §6 makes the SQLAlchemy models the source of truth and
+FastAPI already emits the OpenAPI schema. A hand-written copy of either is a
+second source of truth that drifts before the third brick lands.
 
 ---
 
@@ -363,25 +431,31 @@ highest-impact open question in the project.
 
 One interface, no write methods:
 
-```ts
-/** Read-only view of the client's directory. */
-interface UserDirectory {
-  /** Attribute lookup. Never verifies credentials. */
-  findByNumeroFiscal(nf: string): Promise<DirectoryUser | null>;
+```python
+class UserDirectory(Protocol):
+    """Read-only view of the client's directory."""
 
-  /** Incremental provisioning feed. */
-  list(modifiedSince?: Date): AsyncIterable<DirectoryUser>;
-}
+    async def find_by_numero_fiscal(self, nf: str) -> DirectoryUser | None:
+        """Attribute lookup. Never verifies credentials."""
 
-interface DirectoryUser {
-  externalId: string;   // LDAP entryUUID — the join key
-  numeroFiscal: string;
-  nom: string;
-  prenom: string;
-  email: string;
-  groups: string[];     // raw group DNs, mapped to role by us
-}
+    def list(self, modified_since: datetime | None = None) -> AsyncIterator[DirectoryUser]:
+        """Incremental provisioning feed."""
+
+
+class DirectoryUser(BaseModel):
+    external_id: str      # LDAP entryUUID — the join key
+    numero_fiscal: str
+    nom: str
+    prenom: str
+    email: EmailStr
+    groups: list[str]     # raw group DNs, mapped to role by us
 ```
+
+A `Protocol`, not an ABC: the read-only guarantee comes from the shape having no
+write method, and structural typing keeps `FixtureDirectory` free of an
+inheritance link to the LDAP implementation. Client library: **`bonsai`** (async,
+LDAPS) or `ldap3` if a synchronous sync job turns out simpler — decide inside
+brick **B7** (§16), against the fixture.
 
 Two implementations: `LdapDirectory` (production) and `FixtureDirectory`
 (unit tests, no container needed). The `openldap` container exercises
@@ -393,10 +467,27 @@ moved between OUs; treating one as a stable identifier is a classic bug. Add
 
 ### Provisioning flow
 
-```
-LDAP (read) ──sync job──▶ users table ──▶ activation mail ──▶ user sets password
-                             │
-                             └── status = pending_activation, password_hash = null
+```mermaid
+---
+config:
+  look: handDrawn
+  theme: neutral
+---
+flowchart LR
+    ldap[("Annuaire LDAP<br/><i>lecture seule</i>")]
+    sync["sync job<br/><i>CronJob, idempotent</i>"]
+    users[("users<br/>status = pending_activation<br/>password_hash = null")]
+    mail["mail d'activation"]
+    setpw["utilisateur définit<br/>son mot de passe"]
+    active[("status = active<br/>password_hash = argon2id")]
+
+    ldap -->|entryUUID, attributs| sync
+    sync -->|upsert, jamais DELETE| users
+    users --> mail
+    mail --> setpw
+    setpw --> active
+
+    sync -.->|entrée disparue| disabled[("status = disabled<br/>+ audit event")]
 ```
 
 This matches the brief exactly: *base existante avec des utilisateurs déjà créés
@@ -414,11 +505,15 @@ This matches the brief exactly: *base existante avec des utilisateurs déjà cr�
 
 The directory is outside our failure domain. Treat it accordingly.
 
-1. **Connection pooling + aggressive timeouts.** A slow directory must not
-   exhaust request handlers. Timeout ~2 s, pool the connections, circuit-break
-   after repeated failures.
-2. **Cache attributes in Valkey** with a TTL and background refresh. Attributes
-   change rarely.
+1. **Only the sync job talks to LDAP.** No request handler ever does. This is the
+   rule the rest of this list follows from: the provisioning flow above copies
+   attributes into `users`, so the login path reads Postgres. A slow directory
+   slows a CronJob, nothing a user is waiting on.
+2. **Timeout ~2 s, retry with backoff. No circuit breaker, no Valkey attribute
+   cache.** Both were in an earlier draft and both protect a hot path that does
+   not exist: a breaker guards a cron job from a dependency only it uses, and the
+   `users` row *is* the attribute cache. Two cache layers over one dataset is how
+   they disagree.
 3. **Degradation policy — decide it, don't let it emerge:**
    - Directory unreachable → **existing sessions keep working** (sessions are
      local state, deliberately independent of LDAP).
@@ -488,7 +583,8 @@ configuration, not in code.
 
 ## 6. Data model
 
-Grouped by concern. Prisma is the source of truth; this is the intent.
+Grouped by concern. The SQLAlchemy models + Alembic migrations are the source of
+truth; this is the intent.
 
 ### Identity
 
@@ -518,20 +614,27 @@ sets the first password.
 ### Credentials & recovery
 
 ```
-mfa_factors
-  id, user_id fk, type enum(email_otp, totp, webauthn)
-  secret_encrypted text null        -- totp only
-  target           text null        -- email address for email_otp
-  confirmed_at, created_at, last_used_at
-
-otp_challenges                       -- store in Valkey, TTL-backed
-  id, user_id, purpose enum(mfa, activation, reset)
-  code_hash, attempts int, max_attempts int
-  expires_at, consumed_at
-
 activation_tokens / password_reset_tokens
   id, user_id, token_hash, expires_at, consumed_at, requested_ip
 ```
+
+**No `mfa_factors` table.** The brief specifies email OTP — *le plus simple* —
+and the factor target is already `users.email`. A table with
+`enum(email_otp, totp, webauthn)` and a `secret_encrypted` column stores one
+implied row per user and serves a second factor type nobody has asked for; §17
+Q10 has not come back yet. When it does and the answer is TOTP for admins, this
+is an Alembic migration, not a refactor — the *stage* seam in §9 is what makes
+that cheap, and that seam costs nothing to keep.
+
+**OTP challenges are a Valkey key, not a table** (§11b):
+
+```
+otp:{uid}  →  { code_hash, purpose, attempts }   TTL 10 min
+```
+
+Modelling them as a table with `expires_at`/`consumed_at` columns and then
+annotating "store in Valkey" was the previous draft describing one thing twice.
+`INCR` gives atomic attempt counting and the TTL removes the cleanup job.
 
 **Rule: never store an OTP, activation token, or reset token in plaintext.**
 Hash them exactly as you hash passwords. If the DB leaks, tokens must be inert.
@@ -634,19 +737,25 @@ is the classic zero-downtime rotation pattern.
 | GET | `/authorize` | Validates, then 302 to `auth-frontend` |
 | POST | `/token` | `authorization_code`, `refresh_token` |
 | GET/POST | `/userinfo` | Bearer-protected |
-| POST | `/introspect` | Client-authenticated (RFC 7662) |
 | POST | `/revoke` | RFC 7009 |
 | GET | `/end-session` | RP-initiated logout |
+
+**`/introspect` is deferred.** §11.1 makes access tokens stateless RS256 JWTs
+that Resource Servers validate locally against a cached JWKS — which is what our
+mock services do (§2). Nothing in this system introspects anything. It is ~30
+lines against the `refresh_tokens` table the day a client appears that needs it;
+until then it is an endpoint maintained for no caller. Neither Basic OP nor
+Config OP requires it.
 
 ### Interaction API (ours — consumed by `auth-frontend`)
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET | `/interaction/:uid` | What does this pending auth need next? |
-| POST | `/interaction/:uid/login` | numéro fiscal + password |
-| POST | `/interaction/:uid/mfa/send` | Email an OTP |
-| POST | `/interaction/:uid/mfa/verify` | Verify OTP → advance stage |
-| POST | `/interaction/:uid/consent` | Grant/deny scopes |
+| GET | `/interaction/{uid}` | What does this pending auth need next? |
+| POST | `/interaction/{uid}/login` | numéro fiscal + password |
+| POST | `/interaction/{uid}/mfa/send` | Email an OTP |
+| POST | `/interaction/{uid}/mfa/verify` | Verify OTP → advance stage |
+| POST | `/interaction/{uid}/consent` | Grant/deny scopes |
 
 The `uid` is an opaque handle to server-side state. **The client never carries
 `client_id`, `scope`, or `redirect_uri` back to us** — those stay server-side,
@@ -671,17 +780,20 @@ tax-identifier namespace.
 | --- | --- |
 | GET | `/me` |
 | GET | `/me/sessions` — *plusieurs appareils* |
-| DELETE | `/me/sessions/:id` |
+| DELETE | `/me/sessions/{id}` |
 | GET | `/me/audit` — user's own connection history |
 | POST | `/me/password` |
-| GET/POST/DELETE | `/me/mfa/factors` |
+
+No `/me/mfa/factors`: with email OTP as the only factor there is nothing to
+list, add, or delete (§6). It returns with the `mfa_factors` table if §17 Q10
+brings TOTP.
 
 ### Admin (`svc:admin.*`)
 
 | Method | Path |
 | --- | --- |
 | GET/POST/PATCH/DELETE | `/admin/users` |
-| POST | `/admin/users/:id/lock` / `/unlock` / `/resend-activation` |
+| POST | `/admin/users/{id}/lock` / `/unlock` / `/resend-activation` |
 | GET/POST/PATCH/DELETE | `/admin/clients` |
 | GET | `/admin/audit` (filter, paginate, export) |
 | GET | `/admin/sessions` |
@@ -706,10 +818,15 @@ This is the heart of the system. Order matters; do not reorder.
    hybrid), `scope` contains `openid`, `state` present, `nonce` present.
 5. **Require PKCE**: `code_challenge` present, `code_challenge_method=S256`.
    Reject `plain`. Require it from confidential clients too.
-6. Create pending-interaction state (Valkey, 10 min TTL), get `uid`.
-7. Is there a live SSO session cookie satisfying required `acr`?
-   - Yes → skip to step 9 (**this is SSO**).
-   - No → 302 to `auth-frontend/login?uid=…`.
+6. Is there a live SSO session cookie satisfying required `acr`?
+   - Yes → skip to step 9 (**this is SSO**). No interaction state is written.
+   - No → continue.
+7. Create pending-interaction state (Valkey, 10 min TTL), get `uid`, then 302 to
+   `auth-frontend/login?uid=…`.
+
+   *These two steps are in this order deliberately.* §11 puts 90 % of peak
+   traffic on the SSO path; writing interaction state before checking the cookie
+   means the busiest branch does a Valkey write it never reads.
 8. Frontend drives stages: password → MFA → (consent). Each step posts to the
    interaction API; the server decides what's next. Never trust the client's
    claim about which stage it's on.
@@ -764,11 +881,14 @@ user submits → constant-time compare → max 5 attempts → on success set
 **[À VALIDER — client]** Internal SMTP relay or third-party provider? Affects the
 k8s manifest and the deliverability story. Dev uses Mailpit regardless.
 
-**Design for extension now:** model `mfa_factors` as a table, and MFA as a
-*stage*, so adding TOTP or WebAuthn later is a new stage implementation rather
-than a refactor. Mention this in the client review — email OTP is the weakest
-common factor, and for `admin` accounts it is arguably insufficient. Consider
-requiring TOTP for admins as a stretch goal.
+**Keep the seam, skip the scaffolding.** MFA is a *stage* in the §8 flow, which
+is what makes a second factor a new stage implementation rather than a refactor.
+That seam is free — it is how the flow already works. The `mfa_factors` table,
+the factor-type enum and `/me/mfa/factors` are **not** free and are cut (§6, §7):
+they model a choice no user has. Mention this in the client review — email OTP is
+the weakest common factor, and for `admin` accounts it is arguably insufficient
+(§17 Q10). If the answer is TOTP for admins, the work is a migration plus one
+stage class, scheduled then.
 
 ---
 
@@ -817,9 +937,16 @@ magnitude. Do not silently design for either reading.
    scaling and rolling restarts for free.
 3. **Argon2id is deliberately expensive.** At high login rates it is the
    bottleneck. Tune parameters against measured hardware; consider a dedicated
-   node pool for login. Budget this in the k6 tests.
-4. **Postgres**: PgBouncer (transaction pooling), read replicas for audit
-   queries, partition `audit_events` by month.
+   node pool for login. Budget this in the k6 tests. **In Python it must run in a
+   thread pool** (§3) — hashing on the event loop stalls every concurrent
+   request, not just the login being hashed. Size `uvicorn` workers to cores and
+   the executor to the hash cost, and verify both under k6.
+4. **Postgres**: partition `audit_events` by month **now** — it is the one item
+   here that is painful to retrofit once the table is large. PgBouncer and read
+   replicas are deploy-time configuration, not code: write them into the Helm
+   values in **B9** (§16), turn them on when k6 or the answer to §17 Q1 says to.
+   Building them against a load figure the same section says it does not believe
+   is designing for a number nobody has confirmed.
 5. **Valkey** for rate limiting and OTP so hot paths avoid Postgres.
 6. **Graceful degradation**: if mail is down, fail the MFA send with a clear
    error — never fall back to skipping MFA.
@@ -830,6 +957,123 @@ magnitude. Do not silently design for either reading.
 hitting SSO (no password), 10 % full password+OTP. Record p95 latency and error
 rate. Put the graph in the README — it is the evidence for the *montée en charge*
 requirement.
+
+---
+
+## 11b. Valkey — rôle, règle de durabilité, éviction
+
+### What it is
+
+Valkey is a BSD-licensed fork of Redis, created under the Linux Foundation after
+Redis changed its licence in 2024. It is API-compatible, so every Redis client
+library and every Redis tutorial applies unchanged. Choosing it over Redis is a
+licensing decision — relevant for a public-sector deliverable.
+
+### The split rule
+
+This is the rule that decides where anything goes. Write it on the wall:
+
+> **If losing this row means a user has to redo something → Valkey.
+> If losing it means data is gone forever → Postgres.
+> If losing it silently disables a security control → Postgres, whatever its TTL.**
+
+The third line is not padding — it is the clause that puts `authorization_codes`
+in Postgres (§6) despite a 60-second lifetime that reads like textbook Valkey
+data. §8 detects code replay by finding an *already-consumed* code. If that row
+evaporates on a restart, a replayed code looks brand new and the revocation
+chain never fires. The control has to outlive the cache.
+
+```mermaid
+---
+config:
+  look: handDrawn
+  theme: neutral
+---
+flowchart TD
+    q{"Nouvelle donnée<br/>à stocker"}
+    q -->|"perte = utilisateur<br/>recommence"| vk[("Valkey")]
+    q -->|"perte = donnée<br/>définitivement perdue"| pg[("Postgres")]
+
+    vk --- vklist["interaction state (uid)<br/>OTP challenges<br/>rate limit counters<br/>index sid → session"]
+    pg --- pglist["users, password_hash<br/>authorization_codes<br/>refresh_tokens, consents<br/>sessions (source de vérité)<br/>audit_events<br/>signing_keys, clients"]
+
+    classDef box fill:none,stroke-dasharray: 3 3
+    class vklist,pglist box
+```
+
+### What lives in Valkey
+
+| Data | Key pattern | TTL | Why not Postgres |
+| --- | --- | --- | --- |
+| Pending interaction state | `int:{uid}` | 10 min | Written on every `/authorize`, read every step, then dead. Pure churn. |
+| OTP challenges | `otp:{uid}` | 10 min | Native TTL = no cleanup job. `INCR` gives atomic attempt counting. |
+| Rate limit counters | `rl:{scope}:{key}` | window | **Hot path.** Every login, token call and OTP send. This is what a credential-stuffing attack saturates — keep it off the identity DB. |
+| Session lookup index | `sid:{sid}` | session TTL | Fast resolution without a DB round trip per request. **Index only** — see below. |
+
+There is no `dir:*` LDAP attribute cache. An earlier draft had one; §5b's sync
+job already copies those attributes into `users`, so the login path reads
+Postgres and the cache had no reader.
+
+### Could we drop it?
+
+Yes. All four could live in Postgres with `expires_at` columns and a cleanup job.
+Authentik removed its mandatory Redis dependency in 2025.10 and runs on Postgres
+alone.
+
+**We keep it**, because peak load is the headline constraint of this brief and
+rate limiting is a write on *every* request including failed ones. That is
+exactly the traffic shape of an attack, and exactly when the identity database
+must not be saturated.
+
+### Durability rules
+
+1. **Never store the only copy of anything durable.** Sessions are the
+   temptation: the authoritative row stays in `sessions` (Postgres), Valkey holds
+   an index. Revocation must survive a Valkey restart.
+2. **Cache misses fall through**, they don't fail. Miss on `sid:*` → query
+   Postgres.
+3. **Rate limiting fails *closed*.** If Valkey is unreachable, reject rather than
+   allow. Failing open removes brute-force protection at precisely the moment
+   something is going wrong. This is the one place where degradation is *not*
+   graceful, and that is deliberate.
+4. **Interaction state and OTPs failing = login failures, not security holes.**
+   Acceptable. The user retries.
+
+### Eviction policy — footgun
+
+Valkey holds two different *kinds* of data here, and they need opposite policies:
+
+| Kind | Keys | Eviction |
+| --- | --- | --- |
+| True cache — evictable | `sid:*` | `allkeys-lru` fine |
+| **Not a cache** — evicting breaks logins | `int:*`, `otp:*`, `rl:*` | must **never** be evicted |
+
+Setting a blanket `allkeys-lru` means that under memory pressure Valkey silently
+drops in-flight OTPs and rate limit counters. Logins fail intermittently and
+brute-force protection quietly disappears — with no error anywhere.
+
+**Chosen approach:** `maxmemory-policy noeviction` with generously provisioned
+memory, plus alerting on memory usage. Everything we store has a TTL, so memory
+is bounded by traffic rather than growing without limit. If separation is needed
+later, split into two Valkey instances (not two logical DBs — `maxmemory-policy`
+is per-instance, not per-DB).
+
+```
+# valkey.conf
+maxmemory 512mb
+maxmemory-policy noeviction
+appendonly no          # we never need to recover this data
+```
+
+`appendonly no` is intentional: persisting ephemeral state buys nothing and costs
+I/O on the hot path.
+
+### Kubernetes note
+
+One Valkey instance shared by all `auth-server` replicas. Do **not** run one
+sidecar per pod — rate limit counters and interaction state must be global, or
+three replicas means three times the allowed login attempts. See the
+`--scale auth-server=3` check in §14.
 
 ---
 
@@ -857,6 +1101,21 @@ publishes its own `kid` in a common JWKS. Decide before writing manifests.
 ---
 
 ## 13. OpenID Foundation conformance testing
+
+> **This is the last phase (B10, §16), and deliberately so.** The suite drives a
+> full authorization code flow end to end: it needs Discovery, JWKS,
+> `/authorize`, `/token`, `/userinfo` *and* a working login UI before a single
+> test can go green. Standing it up earlier means paying its setup cost — MongoDB,
+> a Java server, an httpd front, a truststore import, issuer alignment inside and
+> outside Docker — to watch every test fail for reasons you already know about.
+> We do **not** build a test suite up front. We build the bricks, wire them, and
+> then run the suite that already exists.
+>
+> The one thing that does not wait: a ~30-line `pytest` spec smoke test that
+> drives one code flow and asserts `nonce` echo, `at_hash`, `sub` stability and
+> `state` round-trip. It ships with B2 and catches the regressions this suite
+> would catch, at zero infrastructure cost. That is the cheap 80 %; the suite is
+> the certified 100 %.
 
 The OIDF conformance suite is an open source project run by the OpenID
 Foundation, hosted at <https://gitlab.com/openid/conformance-suite/>. Using it to
@@ -907,14 +1166,42 @@ costs nothing.
 
 ## 14. Testing strategy
 
+Two tiers, and the split matters for scheduling: the first runs **inside each
+brick** from the day that brick starts, the second is a **phase of its own at the
+end** (§16 B10).
+
+### Tier 1 — per-brick, continuous
+
+Each brick's tests are part of its definition of done. Nobody builds a suite for
+someone else's brick; you test what you wrote.
+
+| Level | Tool | Owned by | Covers |
+| --- | --- | --- | --- |
+| Unit | pytest | every brick | PKCE verify, scope intersection, token TTLs, OTP compare, Argon2 params |
+| Integration | httpx `ASGITransport` | every brick | Routes against a real Postgres from the compose stack |
+| Spec smoke | pytest, ~30 lines | B2 | One code flow: `nonce` echo, `at_hash`, `sub` stability, `state` round-trip |
+| Component E2E | Playwright | B3, B6 | One happy path per frontend, against the mocked API |
+
+Integration tests use **the compose Postgres**, not testcontainers. The stack is
+already up (B0); a second mechanism for getting a database earns nothing here.
+
+### Tier 2 — cross-cutting, last phase only
+
+These need the whole system wired, so they cannot run before B10 and there is no
+value in writing them earlier.
+
 | Level | Tool | Covers |
 | --- | --- | --- |
-| Unit | Vitest | PKCE verify, scope intersection, token TTLs, OTP compare |
-| Integration | Supertest + testcontainers | Full grant flows against real Postgres |
 | Conformance | OIDF suite | Spec correctness (§13) |
-| E2E | Playwright | Login → MFA → portal → service access → logout |
-| Security | Custom test suite | See below |
+| Security | pytest, the assertions below | The attack list |
+| Full E2E | Playwright | Login → MFA → portal → service access → logout |
 | Load | k6 | *Pics fiscaux* |
+| Multi-replica | `docker compose up --scale auth-server=3` | Anything that only works at `--scale 1` is a Kubernetes bug found early: per-process key generation, in-memory rate limits, sticky interaction state |
+
+**Run the multi-replica check at the first seam (S2), not in B10.** It is one
+command, and the bugs it finds — per-process key generation, in-memory rate
+limits — are structural. Finding them in the last phase means rewriting a brick
+when there is no time left.
 
 **Security regression tests — write these as assertions, not as a checklist:**
 
@@ -948,33 +1235,192 @@ costs nothing.
 - [ ] CORS allow-list, not `*`
 - [ ] Audit log append-only at DB privilege level
 - [ ] Secrets from env/secret manager, never committed
-- [ ] Dependency scanning in CI (`npm audit`, Dependabot/Renovate)
+- [ ] Dependency scanning in CI (`pip-audit` backend, `npm audit` frontends,
+      Dependabot/Renovate), and a lockfile (`uv.lock` / `poetry.lock`) committed
 - [ ] Threat model written up in `docs/threat-model.md`
 
 ---
 
-## 16. Roadmap
+## 16. Build plan — bricks, lanes, schedule
 
-Each session ends with something demonstrable.
+The previous version of this section was a single 12-step queue: one person's
+plan, run twelve times. This one is built so several people work at once.
 
-| # | Goal | Deliverable |
+### The rule that makes parallelism possible
+
+**Bricks depend on frozen contracts, never on each other's code.** That is the
+whole trick, and it is why B0 exists. If a lane needs to read another lane's
+source to know what to build, the contract was not specific enough and the two
+lanes have quietly become one.
+
+The corollary: **every lane starts against a fake.** Waiting for the real
+dependency is what turns a parallel plan back into a queue.
+
+### B0 — the four contracts to freeze
+
+One short session, everyone in the room. Nothing else starts until these exist,
+and they are the only things that need everyone.
+
+| Contract | Artefact | Unblocks |
 | --- | --- | --- |
-| 1 | Decisions + scaffolding | Repo, compose stack up, Prisma schema v1, ADRs |
-| 2 | Identity core | Seeded users, activation flow, login, sessions, Argon2id |
-| 3 | OIDC skeleton | Discovery, JWKS, `/authorize` + `/token` with PKCE, one test client |
-| 4 | Clients & consent | Client registry, consent screen, `/userinfo` |
-| 5 | Token lifecycle | Refresh rotation + reuse detection, revoke, introspect |
-| 6 | MFA | Email OTP stage, Mailpit, `acr`/`amr` claims |
-| 7 | Authorization | Roles → scopes, 2 mock Resource Servers enforcing scopes |
-| 7b | Annuaire | OpenLDAP fixture seeded, read-only `UserDirectory` adapter, sync job (§5b) |
-| 8 | Conformance | OIDF Basic OP plan running; fix the failures |
-| 9 | Traçabilité | Audit log, `/me/sessions`, device management UI |
-| 10 | Portal | Page d'accueil, role-filtered tiles, admin CRUD screens |
-| 11 | Scale | Key rotation job, rate limiting, k6 results, Helm chart |
-| 12 | Hardening & review | Security tests green, README fonctionnalités, client demo |
+| Database shape | `alembic/versions/0001_*.py` (§6) | B1, B7, B8 |
+| Token & claim shapes | Pydantic models for ID token, access token, `authorization_codes` (§5, §6) | B2, B5 |
+| Interaction API | OpenAPI schema for `/interaction/{uid}/*` (§7) | B3, B6 |
+| Scopes & errors | Role→scope table, OAuth `error=` codes (§5) | B2, B5, B6 |
 
-**Milestone rule:** do not start session *n+1* until session *n*'s tests pass.
-Auth code that "mostly works" is the failure mode this project exists to avoid.
+Also in B0: compose stack up, Caddy, Postgres, Valkey, `/health/live`,
+`/health/ready`, request-id at the edge, CI running `pytest`.
+
+### The bricks
+
+| # | Brick | Owns | Starts against | Done when |
+| --- | --- | --- | --- | --- |
+| **B0** | Socle & contrats | Compose, Caddy, PG, Valkey, migration v1, CI | — | Stack up, four contracts merged |
+| **B1** | Identité | `users`, Argon2id, activation, reset, lockout | Seed script | A user can be seeded → activated → password verified, in pytest |
+| **B2** | Cœur OIDC | Discovery, JWKS, keystore, `/authorize`, `/token`, PKCE, codes, refresh rotation, `/userinfo`, `/revoke`, `/end-session` | `fake_authenticate()` returning a seeded uuid | Spec smoke test green (§13) |
+| **B3** | Interaction & auth-frontend | Stage machine, `/login`, `/mfa`, `/consent`, `/activate`, `/reset`, `/error` | OpenAPI mock (Prism or MSW) | Playwright happy path against the mock |
+| **B4** | MFA e-mail | OTP generate/verify, Mailpit, `acr`/`amr` | B3's stage seam | OTP stage advances the flow; brute force locks |
+| **B5** | Ressources & scopes | `svc-impots`, `svc-cadastre`, JWKS validation, scope enforcement | Throwaway-signed JWT + a checked-in `jwks.json` | Under-scoped token → 403; `alg:none` → reject |
+| **B6** | Portail & admin | `portal-frontend`, role-filtered tiles, admin CRUD screens | Same OpenAPI mock as B3 | Screens render every role from fixtures |
+| **B7** | Annuaire LDAP | Fixture, `UserDirectory`, sync job | `FixtureDirectory` (no container) | Sync is idempotent; a vanished entry disables, never deletes |
+| **B8** | Traçabilité | `audit_events`, `sessions`, `/me/*` | Emitted events from whatever exists | Append-only enforced at DB privilege level |
+| **B9** | Ops & charge | Rate limiting, key rotation CronJob, k6, Helm chart | Running system | k6 report produced; `--scale 3` clean |
+| **B10** | Conformité & durcissement | OIDF suite, security regression suite | Whole system | Basic OP + Config OP pass; §14 assertions green |
+
+### What each lane fakes, and when the fake dies
+
+The fakes are the schedule. Deleting one is an integration seam, and every seam
+below is a scheduled piece of work owned by two people — not something discovered
+late.
+
+| Seam | Fake removed | Owners |
+| --- | --- | --- |
+| **S1** | `fake_authenticate()` → B1's real password check | B1 + B2 |
+| **S2** | OpenAPI mock → B2's real interaction API | B3 + B2 |
+| **S3** | Throwaway JWKS → B2's real signing keys | B5 + B2 |
+| **S4** | B3's stubbed MFA stage → B4's real OTP | B4 + B3 |
+| **S5** | `FixtureDirectory` → sync job writing real `users` | B7 + B1 |
+| **S6** | B6's mock → real audit and session data | B6 + B8 |
+
+### Dependency graph — what actually blocks what
+
+```mermaid
+---
+config:
+  look: handDrawn
+  theme: neutral
+---
+flowchart LR
+    subgraph b0["B0 · frozen contracts"]
+        schema["schéma<br/>Alembic v1"]
+        claims["formes de jetons<br/>Pydantic"]
+        api["OpenAPI<br/>interaction"]
+    end
+
+    schema --> B1["B1 · Identité"]
+    schema --> B7["B7 · Annuaire"]
+    schema --> B8["B8 · Traçabilité"]
+    claims --> B2["B2 · Cœur OIDC"]
+    claims --> B5["B5 · Ressources"]
+    api --> B3["B3 · auth-frontend"]
+    api --> B6["B6 · Portail"]
+
+    B1 -.->|S1| B2
+    B3 -.->|S2| B2
+    B5 -.->|S3| B2
+    B4["B4 · MFA"] -.->|S4| B3
+    B7 -.->|S5| B1
+    B8 -.->|S6| B6
+
+    B2 --> B9["B9 · Ops & charge"]
+    B9 --> B10["B10 · Conformité"]
+
+    classDef seam stroke-dasharray: 5 5
+    class B4 seam
+```
+
+Solid edges are contract dependencies — they exist from B0 and never block
+anyone. Dotted edges are the **seams**: they are integration events, not
+prerequisites. A lane keeps working right through them.
+
+### Schedule
+
+Unit is one working session. No dates — the shape is what matters, and the
+client answers in §17 will move the right-hand half anyway.
+
+```mermaid
+gantt
+    title Ordre de construction — un couloir par personne, couloirs parallèles indépendants
+    dateFormat YYYY-MM-DD
+    axisFormat S%V
+    tickInterval 1week
+
+    section Socle
+    B0 · stack + gel des contrats            :crit, b0,   2024-01-01, 1w
+
+    section A — Identité
+    B1 · users, Argon2id, activation, reset  :b1,         2024-01-08, 3w
+    S1 · authenticate() réel                 :milestone, m1, 2024-01-29, 0d
+
+    section B — Protocole
+    B2 · discovery, JWKS, authorize, token   :b2,         2024-01-08, 4w
+    B2 · refresh rotation + reuse detection  :b2b,        2024-01-29, 2w
+    S2 · le front quitte le mock             :milestone, m2, 2024-02-05, 0d
+
+    section C — Interfaces
+    B3 · machine à étapes + auth-frontend    :b3,         2024-01-08, 4w
+    B6 · portail + écrans admin              :b6,         2024-01-22, 5w
+
+    section D — Ressources
+    B5 · svc-impots, svc-cadastre, scopes    :b5,         2024-01-08, 2w
+    S3 · jeton réel accepté par les RS       :milestone, m3, 2024-02-05, 0d
+
+    section E — Annuaire (gated §17)
+    B7 · fixture, adapter, sync job          :b7,         2024-01-15, 4w
+
+    section Intégration
+    B4 · OTP e-mail, Mailpit, acr/amr        :b4,         2024-02-05, 2w
+    consentement + /userinfo                 :cons,       2024-02-12, 1w
+
+    section Suite
+    B8 · audit, sessions, /me                :b8,         2024-02-19, 2w
+    B9 · rate limits, rotation, k6, Helm     :b9,         2024-03-04, 2w
+
+    section Dernier — validation
+    B10 · OIDF Basic OP + Config OP          :crit, b10,  2024-03-18, 2w
+    B10 · régression sécurité                :crit, b10b, 2024-03-18, 2w
+```
+
+> The dates above are **scaffolding, not a commitment**: one week = one working
+> session, and the axis is labelled `S01…S13` so nothing reads as a calendar
+> promise. Mermaid needs real dates to place bars reliably; the session labels
+> are what you read.
+
+Three things the shape encodes:
+
+1. **Four lanes start at once**, immediately after B0. Nobody waits on B2 despite
+   B2 being the heart of the system, because B1, B3 and B5 each start against a
+   fake instead of against B2.
+2. **B7 (annuaire) is deliberately isolated.** It is the one brick gated on client
+   answers (§17 Q5, Q6) and Q5 could invalidate its design outright. It sits on
+   its own lane touching only `users`, so it can slip a full phase — or be
+   rebuilt — without stalling anything else.
+3. **B10 is last and it is a phase, not an afterthought.** Two sessions, because
+   §13 says to expect a wall of failures on the first run and each one is a real
+   spec bug to fix.
+
+### Rules
+
+- **Brick rule** (replaces the old milestone rule): a brick is done when *its own*
+  tests pass (§14 tier 1). Lanes do not wait on each other, but a lane does not
+  advance past a red brick.
+- **Seam rule:** a seam is booked as work for two people. "We'll wire it up when
+  we get there" is how a parallel plan silently becomes a queue at the end.
+- **Fake rule:** every fake is deleted at its seam. A fake still in the tree at
+  B10 is a lie the conformance suite will find.
+- **Run `--scale auth-server=3` at S2**, not in B10 (§14).
+- **Small team?** Collapse in this order: B5 into B2, B6 into B3, B8 into B1.
+  Never collapse B7 into anything — it is the one with an external dependency.
 
 ---
 
@@ -995,7 +1441,7 @@ Collect answers at the next *point client* — these are blocking:
 6. **LDAP — schema.** Anonymised LDIF for one entry, base DN, search filter,
    which attribute carries the numéro fiscal, group→role mapping, `entryUUID`
    availability, directory size and change rate, LDAPS endpoint + CA. Full list
-   at the end of §5b. Blocking for session 7b.
+   at the end of §5b. Blocking for brick **B7** (§16).
 7. **Password policy** — ANSSI recommendations? Rotation? History?
 8. **Session lifetime** — idle timeout and absolute max, per role?
 9. **Audit retention** — how long, and does it need to be exportable/immutable
