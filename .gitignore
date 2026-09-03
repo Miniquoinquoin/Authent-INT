@@ -1,0 +1,95 @@
+# Authent'INT — see docs/adr/0001-choix-stack.md §4 for the layout this mirrors.
+
+# ---------------------------------------------------------------- secrets
+# This repo is an identity provider. Nothing that signs or unlocks anything
+# gets committed, ever (§15).
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+*.p12
+*.jks
+# .crt is allowed on purpose: the LDAPS CA and Caddy's root are public halves.
+
+# ------------------------------------------------------------ python / uv
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+# Committed on purpose: uv.lock / poetry.lock (§15), .python-version (pins 3.13),
+# and every alembic/versions/*.py — the migrations are a client deliverable.
+
+# ------------------------------------------------- node / vite frontends
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.tsbuildinfo
+.eslintcache
+npm-debug.log*
+yarn-error.log*
+# Committed on purpose: package-lock.json, and the generated OpenAPI types in
+# apps/*/src/api/types.ts — committing them keeps the frontend buildable
+# without a running auth-server.
+
+# ------------------------------------------------------ docker / local infra
+docker-compose.override.yml
+pgdata/
+valkey-data/
+caddy-data/
+caddy-config/
+caddy-root.crt
+
+# --------------------------------------------------------- tests & load
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+load/results/
+# Committed on purpose: docs/conformance-results/ — the OIDF exports are a
+# deliverable (§13, §18), not build output.
+
+# --------------------------------------------------------------- macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.DocumentRevisions-V100
+.TemporaryItems
+.Trashes
+.fseventsd
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# ------------------------------------------------------------- Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+*.stackdump
+
+# --------------------------------------------------------------- Linux
+*~
+.directory
+.Trash-*
+.nfs*
+
+# --------------------------------------------------------------- editors
+.vscode/
+.idea/
+*.swp
+*.swo
