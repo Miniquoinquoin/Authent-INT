@@ -1,0 +1,49 @@
+[
+  {
+    "external_id": "b3f1c8de-0000-4a10-9c31-000000000001",
+    "numero_fiscal": "1801234567891",
+    "nom": "Marchand",
+    "prenom": "Claire",
+    "email": "claire.marchand@dgfip.example",
+    "groups": ["cn=admins,ou=groupes,dc=dgfip,dc=local"]
+  },
+  {
+    "external_id": "b3f1c8de-0000-4a10-9c31-000000000002",
+    "numero_fiscal": "1802234567892",
+    "nom": "Lefèvre",
+    "prenom": "Aurélien",
+    "email": "aurelien.lefevre@dgfip.example",
+    "groups": ["cn=agents,ou=groupes,dc=dgfip,dc=local"]
+  },
+  {
+    "external_id": "b3f1c8de-0000-4a10-9c31-000000000003",
+    "numero_fiscal": "1803234567893",
+    "nom": "Nguyen",
+    "prenom": "Bao",
+    "email": "bao.nguyen@dgfip.example",
+    "groups": ["cn=agents,ou=groupes,dc=dgfip,dc=local"]
+  },
+  {
+    "external_id": "b3f1c8de-0000-4a10-9c31-000000000004",
+    "numero_fiscal": "1804234567894",
+    "nom": "Da Silva",
+    "prenom": "Inês",
+    "email": "ines.dasilva@contribuable.example",
+    "groups": ["cn=contribuables,ou=groupes,dc=dgfip,dc=local"]
+  },
+  {
+    "external_id": "b3f1c8de-0000-4a10-9c31-000000000005",
+    "numero_fiscal": "1805234567895",
+    "nom": "Petit",
+    "prenom": "Hugo",
+    "email": "hugo.petit@contribuable.example"
+  },
+  {
+    "external_id": "b3f1c8de-0000-4a10-9c31-000000000006",
+    "numero_fiscal": "1806234567896",
+    "nom": "Roussel",
+    "prenom": "Théo",
+    "email": "theo.roussel@contribuable.example",
+    "groups": ["cn=contribuables,ou=groupes,dc=dgfip,dc=local"]
+  }
+]
