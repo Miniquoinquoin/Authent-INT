@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Activation de votre compte Authent'INT</title>
+</head>
+<body style="margin:0;padding:24px;background:#1e4db7;font-family:Helvetica,Arial,sans-serif;color:#1a1a1a;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#ffffff;">
+        <tr>
+          <td align="center" style="padding:24px 32px 8px;border-top:6px solid #1e4db7;">
+            <img src="{{ base_url }}/authent_int_full_logo.png" alt="Authent'INT" width="220" style="display:block;width:220px;max-width:100%;height:auto;">
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:32px 32px 8px;font-size:26px;font-weight:bold;">Activez votre compte</td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:0 32px 8px;font-size:14px;line-height:20px;">
+            Bonjour <strong>{{ prenom }}</strong>, votre compte est prêt à être activé.<br>
+            Choisissez votre mot de passe en cliquant ci-dessous :
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:20px 32px;">
+            <a href="{{ link }}" style="display:inline-block;background:#1e4db7;color:#ffffff;text-decoration:none;font-size:15px;font-weight:bold;padding:14px 28px;border-radius:8px;">Activer mon compte</a>
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:0 32px 20px;font-size:12px;font-weight:bold;">Ce lien est valable {{ ttl_min }} minutes et ne peut servir qu'une fois.</td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:0 32px 32px;font-size:12px;line-height:18px;color:#444444;">
+            Si vous n'êtes pas à l'origine de cette demande, ignorez ce message.
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

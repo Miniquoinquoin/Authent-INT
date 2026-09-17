@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Votre code de connexion Authent'INT</title>
+</head>
+<body style="margin:0;padding:24px;background:#1e4db7;font-family:Helvetica,Arial,sans-serif;color:#1a1a1a;">
+  <span style="display:none;max-height:0;overflow:hidden;">Votre code : {{ code }}</span>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#ffffff;">
+        <tr>
+          <td align="center" style="padding:24px 32px 8px;border-top:6px solid #1e4db7;">
+            <img src="{{ base_url }}/authent_int_full_logo.png" alt="Authent'INT" width="220" style="display:block;width:220px;max-width:100%;height:auto;">
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:32px 32px 8px;font-size:26px;font-weight:bold;">Vérification de connexion</td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:0 32px 8px;font-size:14px;line-height:20px;">
+            Nous avons reçu une demande de connexion à votre compte : <strong>{{ email }}</strong>
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:16px 32px 8px;font-size:12px;font-weight:bold;">Pour finaliser la connexion, saisissez le code ci-dessous :</td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:8px 32px 20px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                {% for d in code %}
+                <td width="44" height="52" align="center" style="width:44px;height:52px;background:#f2f2f2;border:1px solid #d9d9d9;border-radius:8px;font-size:26px;font-weight:bold;padding:0 4px;">{{ d }}</td>
+                <td width="10" style="width:10px;">&nbsp;</td>
+                {% endfor %}
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:0 32px 20px;font-size:12px;font-weight:bold;">Ce code expire dans {{ ttl_min }} minutes.</td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:0 32px 32px;font-size:12px;line-height:18px;color:#444444;">
+            Si vous n'êtes pas à l'origine de cette connexion, changez votre mot de passe<br>
+            immédiatement ou contactez le support.
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
