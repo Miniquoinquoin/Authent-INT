@@ -62,6 +62,7 @@ export default function Login() {
             className="input--mono"
             name="numero_fiscal"
             inputMode="numeric"
+            maxLength={32}
             autoComplete="username"
             autoFocus
             required

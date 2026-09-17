@@ -37,7 +37,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     // The server's failure constant is the message. Composing our own here is
     // exactly how the enumeration property of P§7 step 4 would die.
-    throw new ApiError(response.status, body?.detail ?? "Une erreur est survenue.");
+    //
+    // A 422 is the one status where `detail` is not a sentence but pydantic's
+    // list of error objects; rendering that into the banner crashes React.
+    const detail = typeof body?.detail === "string" ? body.detail : "Saisie invalide.";
+    throw new ApiError(response.status, detail);
   }
   return body as T;
 }

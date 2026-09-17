@@ -4,6 +4,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { ApiError, api } from "../api";
 import { Banner, Shell } from "./Shell";
 
+// Mirrors PASSWORD_MIN_LENGTH in .env.example; nothing serves the value, so
+// a stricter server answers 422 and the banner shows a generic message.
 const MIN_LENGTH = 12;
 
 export default function Activate() {
