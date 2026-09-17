@@ -1,0 +1,55 @@
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: authentint
+          POSTGRES_PASSWORD: authentint
+          POSTGRES_DB: authentint
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U authentint" --health-interval 3s
+          --health-timeout 3s --health-retries 20
+      valkey:
+        image: valkey/valkey:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping" --health-interval 3s
+          --health-timeout 3s --health-retries 20
+      mailpit:
+        image: axllent/mailpit
+        ports: ["1025:1025", "8025:8025"]
+    defaults:
+      run:
+        working-directory: apps/auth-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run alembic upgrade head
+      - run: uv run pytest -q
+      # §15: dependency scanning, both sides. The local project itself is not
+      # on PyPI, so it is skipped rather than failing the run.
+      - run: uv run pip-audit
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/auth-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx tsc --noEmit
+      - run: npm audit --audit-level=high
