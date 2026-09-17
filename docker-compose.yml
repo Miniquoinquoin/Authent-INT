@@ -1,0 +1,70 @@
+# Phase 1 stack — docs/authentication-server.md §2.
+# Four services. No Caddy: it arrives with B0, and every externally visible URL
+# already comes from configuration so that insertion is an .env change.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: authentint
+      POSTGRES_PASSWORD: authentint
+      POSTGRES_DB: authentint
+    # Published only because §9 runs pytest from the host against this database.
+    # §2's "only caddy publishes ports" rule comes back with Caddy.
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authentint -d authentint"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    # §11b: int:*, otp:* and rl:* are not a cache. Evicting them fails logins and
+    # silently disables brute-force protection, so nothing may ever be evicted.
+    command:
+      - valkey-server
+      - --maxmemory
+      - 512mb
+      - --maxmemory-policy
+      - noeviction
+      - --appendonly
+      - "no"
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # web inbox — this is where you read the OTP in dev
+
+  auth-server:
+    build: ./apps/auth-server
+    # One fixed port, so the Vite proxy target stays stable. `make scale` sets
+    # this to a range for the §9 multi-replica check, where three replicas each
+    # need a port of their own.
+    #
+    # A variable rather than a second compose file: Compose *merges* `ports`
+    # across files instead of replacing them, so an override would leave every
+    # replica also trying to bind 8000. The `!override` tag that fixes that
+    # needs Compose 2.24+, and this has to work on what is installed.
+    ports: ["${AUTH_SERVER_PORTS:-8000:8000}"]
+    env_file: [.env]
+    environment:
+      # Inside the network the services have names; .env holds the host-facing
+      # values that alembic and pytest use.
+      DATABASE_URL: postgresql+asyncpg://authentint:authentint@postgres:5432/authentint
+      VALKEY_URL: redis://valkey:6379/0
+      SMTP_HOST: mailpit
+    depends_on:
+      postgres: {condition: service_healthy}
+      valkey: {condition: service_healthy}
+
+volumes:
+  pgdata:

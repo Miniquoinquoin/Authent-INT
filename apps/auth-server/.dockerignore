@@ -1,0 +1,11 @@
+# Docker does not read .gitignore. Without this the 90 MB host .venv lands on
+# /srv/.venv and uv rebuilds the whole environment — the layer split above
+# `COPY . .` only pays off while this file exists.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.git/
+Dockerfile
