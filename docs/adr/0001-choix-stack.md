@@ -1,5 +1,15 @@
 # Authent'INT — Plan d'implémentation
 
+> [!WARNING]
+> **Statut : remplacé par l'[ADR 0002 — Stack simplifiée](0002-stack-simplifiee.md).**
+>
+> Ce document reste consultable comme journal de réflexion : les arbitrages y
+> sont argumentés et plusieurs sections (machine à états `/authorize`, rotation
+> du refresh, règle d'identifiant `sub`) sont reprises telles quelles dans 0002.
+> **Il ne doit plus servir de contrat d'implémentation.** Ce qui a été coupé et
+> pourquoi : voir 0002 §1.
+
+
 > Companion document to the project brief (`README.md`).
 > Audience: the dev team + AI coding assistants (Claude Code).
 > Scope: how to build a self-hosted OpenID Connect Provider for the DGFiP brief.
