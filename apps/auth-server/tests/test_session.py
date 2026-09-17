@@ -65,6 +65,27 @@ async def test_an_activation_token_is_single_use(client, db, inbox):
     assert again.status_code == 400
 
 
+async def test_activating_kills_every_outstanding_token(client, db, inbox):
+    """Each login attempt on a pending account mails a fresh token. Using one
+    must retire the others, or a sibling stays live for its 30 minutes."""
+    assert (await login(client, ADMIN_NF)).status_code == 401
+    first = TOKEN.search(inbox.latest_body()).group(1)
+    assert (await login(client, ADMIN_NF)).status_code == 401
+    second = TOKEN.search(inbox.latest_body()).group(1)
+    assert first != second
+
+    assert (await client.post("/account/activation/confirm", json={"token": second, "password": PASSWORD})).status_code == 204
+
+    # Checked on the rows, not through the endpoint: an `active` account is
+    # refused there regardless, and the hole is the `locked` state it can reach
+    # later, while the sibling token is still inside its 30 minutes.
+    from app.models import ActivationToken
+
+    rows = (await db.scalars(select(ActivationToken))).all()
+    assert len(rows) == 2
+    assert all(r.consumed_at is not None for r in rows), "the sibling token is retired too"
+
+
 async def test_a_short_password_is_refused(client, inbox):
     assert (await login(client, ADMIN_NF)).status_code == 401
     token = TOKEN.search(inbox.latest_body()).group(1)

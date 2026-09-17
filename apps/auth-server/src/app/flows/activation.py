@@ -9,7 +9,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Request, Response
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import security
@@ -83,7 +83,14 @@ async def confirm(
     user.updated_at = now
     user.failed_login_count = 0
     user.locked_until = None
-    row.consumed_at = now
+    # Every outstanding token, not just this one: each login attempt on a
+    # pending account mints another, and a sibling left alive for its 30
+    # minutes would still set a password on an account that already has one.
+    await db.execute(
+        update(ActivationToken)
+        .where(ActivationToken.user_id == user.id, ActivationToken.consumed_at.is_(None))
+        .values(consumed_at=now)
+    )
     await db.commit()
 
     log.info(
