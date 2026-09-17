@@ -124,12 +124,17 @@ async def rate_limit_hit(scope: str, key: str, limit: int, window_s: int) -> boo
     """
     name = _rate(scope, key)
     try:
-        count = int(await _client.incr(name))
-        if count == 1:
-            await _client.expire(name, window_s)
+        # One round trip, and EXPIRE NX only stamps a TTL the key does not have
+        # yet. Two calls with an `if count == 1` between them left a key with
+        # no TTL whenever the second call failed — a counter that never
+        # resets is a permanent lockout for that IP or account.
+        async with _client.pipeline(transaction=True) as pipe:
+            pipe.incr(name)
+            pipe.expire(name, window_s, nx=True)
+            count, _ = await pipe.execute()
     except RedisError as exc:
         raise CacheUnavailable from exc
-    return count <= limit
+    return int(count) <= limit
 
 
 async def ping() -> None:

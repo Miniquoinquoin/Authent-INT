@@ -205,10 +205,12 @@ async def test_valkey_down_rejects_the_login(client, db, monkeypatch):
 
     await activate_directly(db, ADMIN_NF)
 
-    async def dead(*_args, **_kwargs):
+    def dead(*_args, **_kwargs):
         raise RedisConnectionError("valkey is down")
 
-    monkeypatch.setattr(cache._client, "incr", dead)
+    # The limiter is the first thing the login touches, and it goes through a
+    # pipeline; failing its construction is what a dead socket looks like.
+    monkeypatch.setattr(cache._client, "pipeline", dead)
 
     response = await login(client, ADMIN_NF)
 
