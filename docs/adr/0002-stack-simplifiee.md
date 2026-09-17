@@ -209,8 +209,40 @@ signature localement. C'est ça, JWKS (§10).
 | `svc-impots`, `svc-cadastre` | Services mockés — **même image**, config différente | petite app FastAPI |
 | `postgres` | Toute la persistance | `postgres:16-alpine` |
 
-**Règles réseau** — seul `caddy` publie des ports. `postgres` reste sur le
-réseau interne.
+### Règles réseau — cloisonnement par réseaux Docker
+
+Pas de « tout sur localhost ». Deux réseaux, et un seul port publié dans toute
+la stack.
+
+| Réseau | Membres | Propriété |
+| --- | --- | --- |
+| `edge` (bridge) | `caddy`, `frontend`, `auth-server`, les deux mocks | `caddy` y porte les 4 noms d'hôte comme **alias DNS** |
+| `data` (bridge, `internal: true`) | `auth-server`, `postgres` | Aucune passerelle : pas d'accès sortant |
+
+Trois conséquences :
+
+1. **`postgres` est injoignable** depuis les mocks, le frontend et la machine
+   hôte. Un mock compromis n'a aucune route vers la base d'identité.
+2. **`auth-server` est le seul pont** entre les deux réseaux — et le seul
+   composant qui devrait l'être.
+3. **Les alias DNS de `caddy` résolvent l'écueil de l'issuer.** `svc-impots`
+   appelle `https://auth.authentint.local/.well-known/jwks.json`, exactement
+   l'URL que voit le navigateur et exactement le claim `iss`. Sans alias, il
+   appellerait `http://auth-server:8000/…` : URL différente, en clair, chemin
+   TLS jamais exercé en dev.
+
+Le prix des alias : les mocks doivent faire confiance à l'autorité interne de
+Caddy. Le volume `caddy_data` est monté en lecture seule et le client JWKS
+pointe explicitement dessus.
+
+> **Aucune clé `ports:` ailleurs que sur `caddy`.** Publier `5432` « juste pour
+> DBeaver » annule la conséquence n°1. Pour inspecter la base :
+> `docker compose exec postgres psql`.
+
+Ce découpage n'est pas que du développement : il se traduit directement en
+`NetworkPolicy` dans le cluster, donc ce qui est vérifié en local est ce qui
+est déployé. Topologie détaillée et bloc Compose :
+[`docs/architecture.md` §1](../architecture.md#1-vue-densemble).
 
 ### Pourquoi garder Caddy alors qu'on simplifie
 
@@ -1154,6 +1186,8 @@ corrections est une excellente pièce pour la revue client.
 - [ ] Verrouillage de compte avec backoff, et un chemin de déverrouillage admin
 - [ ] CSP stricte sur le frontend, aucun script inline
 - [ ] CORS en liste blanche, jamais `*`
+- [ ] Un seul port publié dans toute la stack : `caddy:443`. `postgres` sur un
+      réseau `internal: true`, joignable par le seul `auth-server`
 - [ ] Audit append-only au niveau des privilèges base
 - [ ] Secrets depuis l'environnement / un gestionnaire, jamais commités
 - [ ] Scan de dépendances en CI (`pip-audit`, `npm audit`) et lockfile commité
