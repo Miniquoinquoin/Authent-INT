@@ -1,0 +1,260 @@
+/* Authent'INT — auth-frontend.
+   A centred card on a plain ground: warm monochrome, flat surfaces, 1px rules.
+   No UI kit, no webfont, no icon library — five pages do not need any of them,
+   and each one is a decision the whole project inherits (P§10). */
+
+:root {
+  --canvas: #f7f6f3;
+  --scrim: rgba(247, 246, 243, 0.62);
+  --surface: #ffffff;
+  --border: #eaeaea;
+  --ink: #111111;
+  --muted: #787774;
+  --field: #ffffff;
+  --danger-bg: #fdebec;
+  --danger-ink: #9f2f2d;
+  --ok-bg: #edf3ec;
+  --ok-ink: #346538;
+  --info-bg: #e1f3fe;
+  --info-ink: #1f6c9f;
+  --warn-bg: #fbf3db;
+  --warn-ink: #956400;
+
+  --sans: -apple-system, "SF Pro Text", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --mono: "SF Mono", "JetBrains Mono", ui-monospace, "Cascadia Mono", Menlo, monospace;
+  --radius: 8px;
+  --radius-sm: 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #1b1b19;
+    --scrim: rgba(20, 20, 18, 0.68);
+    --surface: #232320;
+    --border: #34342f;
+    --ink: #f2f1ed;
+    --muted: #a1a09a;
+    --field: #1b1b19;
+    --danger-bg: #3a1f20;
+    --danger-ink: #f2b8b5;
+    --ok-bg: #1f2e21;
+    --ok-ink: #a7d3ab;
+    --info-bg: #17303f;
+    --info-ink: #9ed0ee;
+    --warn-bg: #37301c;
+    --warn-ink: #e6c67a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
+  background: var(--canvas);
+  color: var(--ink);
+  font: 400 14px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The campus photo, picked per page load in main.tsx. The sources are ~700px
+   wide, so they are blurred and scrimmed: it keeps the card legible and covers
+   for the upscale at the same time. `inset` is negative so the blur has no
+   soft edge to show. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -8px;
+  z-index: -1;
+  background: linear-gradient(var(--scrim), var(--scrim)), var(--bg, none) center / cover no-repeat;
+  filter: blur(3px);
+}
+
+/* ------------------------------------------------------------------- shell */
+.card {
+  width: 100%;
+  max-width: 400px;
+  padding: 40px 32px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+.card--wide { max-width: 560px; }
+
+.brand {
+  margin-bottom: 28px;
+  text-align: center;
+}
+.brand__logo {
+  display: block;
+  height: 48px;
+  width: auto;
+  margin: 0 auto 8px;
+}
+/* The wordmark is a dark blue that sinks into the dark ground. */
+@media (prefers-color-scheme: dark) {
+  .brand__logo { filter: brightness(1.45); }
+}
+.brand__org {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+
+h1 {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+.lede {
+  margin: 0 0 24px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* -------------------------------------------------------------------- form */
+form { display: grid; gap: 16px; }
+
+label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+input {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--field);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+input:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+input[disabled] { opacity: 0.55; }
+
+.field__hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.input--mono {
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+}
+.input--code {
+  font-family: var(--mono);
+  font-size: 22px;
+  text-align: center;
+  letter-spacing: 0.35em;
+  text-indent: 0.35em; /* keeps the glyphs optically centred despite tracking */
+  padding: 12px;
+}
+
+/* ------------------------------------------------------------------ button */
+button {
+  width: 100%;
+  padding: 11px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: var(--surface);
+  font: 500 14px/1 var(--sans);
+  cursor: pointer;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+button:hover:not([disabled]) { opacity: 0.86; }
+button:active:not([disabled]) { transform: scale(0.985); }
+button[disabled] { opacity: 0.5; cursor: not-allowed; }
+button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+.button--quiet {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--border);
+}
+
+.button--link {
+  width: auto;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.button--link:hover:not([disabled]) { color: var(--ink); opacity: 1; }
+
+/* ------------------------------------------------------------------ banner */
+.banner {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  border: 1px solid transparent;
+}
+.banner--error { background: var(--danger-bg); color: var(--danger-ink); border-color: currentColor; }
+.banner--info { background: var(--info-bg); color: var(--info-ink); border-color: currentColor; }
+/* An empty live region still has to exist before the message arrives, or the
+   screen reader never announces it. */
+.banner:empty { display: none; }
+
+/* ------------------------------------------------------------------- badge */
+.badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.badge--admin { background: var(--warn-bg); color: var(--warn-ink); }
+.badge--agent { background: var(--info-bg); color: var(--info-ink); }
+.badge--contribuable { background: var(--ok-bg); color: var(--ok-ink); }
+.badge--active { background: var(--ok-bg); color: var(--ok-ink); }
+
+/* ---------------------------------------------------------------- identity */
+.identity {
+  display: grid;
+  grid-template-columns: minmax(0, 9rem) 1fr;
+  gap: 0;
+  margin: 0 0 28px;
+  font-size: 14px;
+}
+.identity dt,
+.identity dd {
+  margin: 0;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+}
+.identity dt { color: var(--muted); font-size: 13px; }
+.identity dd:last-of-type,
+.identity dt:last-of-type { border-bottom: none; }
+
+.actions { display: grid; gap: 12px; justify-items: start; }
+.actions button { width: 100%; }
+
+.footnote {
+  margin: 24px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
