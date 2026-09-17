@@ -15,5 +15,9 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev
 
 ENV PATH="/srv/.venv/bin:$PATH"
+# Nothing here needs root, and an identity provider is the last process that
+# should have it if a dependency turns out to be exploitable (§15).
+RUN useradd --system --no-create-home app && chown -R app /srv
+USER app
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
