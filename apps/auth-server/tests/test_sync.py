@@ -111,3 +111,17 @@ async def test_attribute_change_updates_the_row(fixture_file, db):
     db.expire_all()
     user = await db.scalar(select(User).where(User.numero_fiscal == ADMIN))
     assert user.nom == "Marchand-Dubois"
+
+
+async def test_an_empty_feed_disables_nobody(fixture_file, db):
+    """An empty feed is a directory outage, not a directory with no users.
+    Disabling everyone would lock the user base out as surely as deleting it."""
+    await sync(fixture_file, db)
+    fixture_file.write_text("[]", encoding="utf-8")
+
+    report = await sync(fixture_file, db)
+
+    assert (report.seen, report.disabled) == (0, 0)
+    db.expire_all()
+    statuses = {u.status for u in (await db.scalars(select(User))).all()}
+    assert statuses == {Status.PENDING_ACTIVATION}, "nobody was touched"

@@ -98,12 +98,19 @@ async def run(directory: UserDirectory, db: AsyncSession) -> Report:
         user.synced_at = now
 
     # Never deletes. A vanished entry is disabled, because a transient directory
-    # error must not be able to empty the user base (§5b).
+    # error must not be able to empty the user base (§5b). An *empty* feed is
+    # that error, not a directory with nobody in it: disabling everyone would
+    # lock the whole user base out just as surely as deleting it.
+    if not seen:
+        log.error("sync.empty_feed", extra={"event": {"event_type": "sync.empty_feed", "outcome": "failure"}})
+        await db.rollback()
+        return report
+
     vanished = await db.execute(
         update(User)
         .where(
             User.external_id.is_not(None),
-            User.external_id.not_in(seen) if seen else User.external_id.is_not(None),
+            User.external_id.not_in(seen),
             User.status != Status.DISABLED,
         )
         .values(status=Status.DISABLED, updated_at=now)
