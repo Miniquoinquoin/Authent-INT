@@ -1,39 +1,15 @@
 # syntax=docker/dockerfile:1
-#
-# STUB — à remplacer par le vrai auth-server (FastAPI, docs/architecture.md §13).
-# Il existe uniquement pour que `docker compose up` démarre et que le routage
-# Caddy + TLS soit vérifiable dès aujourd'hui. Répond 200 sur tout.
-FROM python:3.13-alpine
 
-ENV SERVICE_NAME=auth-server \
-    PORT=8000
+FROM python:3.13-slim
+COPY --from=ghcr.io/astral-sh/uv:0.12.1 /uv /uvx /bin/
 
-COPY <<'PY' /app/stub.py
-import json
-import os
-from http.server import BaseHTTPRequestHandler, HTTPServer
+WORKDIR /app
 
-SERVICE = os.environ.get("SERVICE_NAME", "service")
-PORT = int(os.environ.get("PORT", "8000"))
-
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        body = json.dumps(
-            {"service": SERVICE, "path": self.path, "stub": True}
-        ).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, fmt, *args):
-        print(f"{SERVICE} {fmt % args}", flush=True)
-
-
-HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
-PY
+COPY pyproject.toml uv.lock ./
+# Separating dependencies from project files to prevent useless Docker rebuilds
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-install-project
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked
 
 EXPOSE 8000
-CMD ["python", "-u", "/app/stub.py"]
+CMD ["uv", "run", "--no-sync", "uvicorn", "authentint.main:app", "--host", "0.0.0.0", "--port", "8000"]

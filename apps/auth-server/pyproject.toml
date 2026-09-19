@@ -1,0 +1,27 @@
+[project]
+name = "auth-server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Ma115tte", email = "73129460+Ma115tte@users.noreply.github.com" },
+    { name = "Miniquoinquoin", email = "69959845+Miniquoinquoin@users.noreply.github.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "asyncpg>=0.31.0",
+    "bcrypt>=5.0.0",
+    "cryptography>=50.0.1",
+    "fastapi>=0.141.1",
+    "python-jose>=3.5.0",
+    "python-multipart>=0.0.32",
+    "sqlalchemy[asyncio]>=2.0.54",
+    "uvicorn>=0.53.0",
+]
+
+[project.scripts]
+auth-server = "auth_server:main"
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
