@@ -1,0 +1,8 @@
+# Developer overrides — opt-in via COMPOSE_FILE in .env (see .env.example).
+# Not loaded by plain `docker compose up`, so everyone else runs the image as built.
+services:
+  auth-server:
+    command: ["uv", "run", "--no-sync", "uvicorn", "authentint.main:app",
+              "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - ./apps/auth-server/src:/app/src # src only: never overlay the host .venv
