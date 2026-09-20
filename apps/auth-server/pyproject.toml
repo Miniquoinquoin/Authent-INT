@@ -19,8 +19,8 @@ dependencies = [
     "uvicorn>=0.53.0",
 ]
 
-[project.scripts]
-auth-server = "auth_server:main"
+[tool.uv.build-backend]
+module-name = "authentint"
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
