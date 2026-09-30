@@ -3,7 +3,8 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Protocol
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
+from pydantic import EmailStr
 
 from authentint.infra.models.identity import Role
 
