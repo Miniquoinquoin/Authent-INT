@@ -708,12 +708,19 @@ authentint/
 ├── apps/
 │   ├── auth-server/
 │   │   ├── src/
-│   │   │   ├── oidc/            # authorize · token · discovery · jwks · userinfo
-│   │   │   ├── flows/           # login · consentement · activation · reset
-│   │   │   ├── admin/           # CRUD utilisateurs · clients · rotation de clés
-│   │   │   ├── domain/          # entités · résolution de scopes
-│   │   │   ├── infra/           # db · directory · mailer · keystore · ratelimit
-│   │   │   └── audit/
+│   │   │   ├── config.py        # Settings (variables d'environnement)
+│   │   │   ├── infra/           # connexion db · modèles SQLAlchemy — rien d'autre
+│   │   │   ├── domain/          # claims · scopes · erreurs — logique pure
+│   │   │   ├── security/        # mots de passe · rate limit · vérification Bearer
+│   │   │   ├── external/        # annuaire · mailer
+│   │   │   ├── keys/            # keystore · rotation
+│   │   │   ├── audit/           # emit · request_id · /admin/audit · /me/audit
+│   │   │   ├── users/           # requêtes + /me · /admin/users
+│   │   │   ├── clients/         # requêtes + /admin/clients
+│   │   │   ├── sessions/        # requêtes + /me/sessions · /admin/sessions
+│   │   │   ├── flows/           # interaction (login · consentement) · activation · reset
+│   │   │   ├── oidc/            # discovery · jwks · authorize · token · userinfo · revoke · end_session
+│   │   │   └── ops/             # /health/* · /metrics
 │   │   ├── alembic/             # migrations versionnées (livrable)
 │   │   └── tests/
 │   ├── frontend/                # un seul build Vite
