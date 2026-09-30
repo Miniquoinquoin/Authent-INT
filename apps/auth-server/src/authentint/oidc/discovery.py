@@ -3,10 +3,10 @@
 from . import router
 from authentint.config import settings
 from authentint.domain.claims import IdToken
-from authentint.domain.scopes import ALLOWED
+from authentint.domain.scopes import ALLOWED, OIDC_SCOPES
 
 # Derived from domain/ so the published lists can't drift from what the server grants
-SCOPES_SUPPORTED = ["openid", *sorted(set().union(*ALLOWED.values()))]
+SCOPES_SUPPORTED = sorted(OIDC_SCOPES.union(*ALLOWED.values()))
 CLAIMS_SUPPORTED = list(IdToken.model_fields)
 
 @router.get("/.well-known/openid-configuration")
