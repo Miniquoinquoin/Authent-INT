@@ -8,6 +8,9 @@ from joserfc.jwk import RSAKey
 from joserfc import jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.security import HTTPBasicCredentials
+from datetime import datetime
+from datetime import timezone
+from datetime import timedelta
 
 from authentint.config import settings
 from authentint.infra.models.oauth import OAuthClients
@@ -17,9 +20,11 @@ from authentint.infra.models.identity import User
 from authentint.domain.errors import OAuthError
 from authentint.domain.claims import IdToken
 from authentint.domain.claims import AccessToken
+from authentint.infra.models.oauth import OAuthRefreshTokens
 from authentint.clients import queries as clients
 from authentint.security.passwords import verify_password
 from authentint.domain.scopes import audiences
+from authentint.security.passwords import hash_token
 
 
 class TokenBody(BaseModel):
@@ -100,5 +105,21 @@ def access_claims(row: OAuthAuthorizationCodes, now: int) -> dict:
 
     return access_token.model_dump(mode="json")
 
-async def issue_refresh(session: AsyncSession, row) -> str:
-    pass
+async def issue_refresh(session: AsyncSession, row: OAuthAuthorizationCodes) -> str:
+    # the caller issues this only when "offline_access" is in row.scope (spec §6)
+
+    raw_token = secrets.token_urlsafe(32)
+    refresh_token = OAuthRefreshTokens(
+        token_hash=hash_token(raw_token),
+        parent_hash=None,
+        client_id=row.client_id,
+        user_id=row.user_id,
+        session_id=row.session_id,
+        scope=row.scope,
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=settings.refresh_token_ttl)
+    )
+
+    session.add(refresh_token)
+    await session.commit()
+
+    return raw_token
