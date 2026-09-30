@@ -20,6 +20,8 @@ from urllib.parse import urlencode
 
 from fastapi import Depends
 from fastapi import HTTPException
+from fastapi import Request
+from fastapi import Response
 from pydantic import BaseModel
 from pydantic import Field
 from sqlalchemy import func
@@ -29,7 +31,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import router
 from authentint.config import settings
 from authentint.clients import queries as clients
+from authentint.flows.login import authenticate
 from authentint.infra.database import get_session
+from authentint.sessions import queries as sessions
 from authentint.infra.models.oauth import OAuthClients
 from authentint.infra.models.oauth import OAuthInteractions
 
@@ -108,12 +112,24 @@ async def get_interaction(uid: str, session: AsyncSession = Depends(get_session)
     404: {"description": "Unknown or expired uid"},
     423: {"description": "Account locked"},
     429: {"description": "Rate limited"},
-    501: {"description": "Not built yet (B1)"},
 })
-async def login(uid: str, body: LoginBody, session: AsyncSession = Depends(get_session)):
+async def login(uid: str, body: LoginBody, request: Request, response: Response,
+                session: AsyncSession = Depends(get_session)):
     """On success, sets the `__Host-session` cookie and answers the next step."""
 
-    raise HTTPException(501, "B1: password check, lockout, rate limit, sessions.create")
+    it = await load(session, uid)
+    user = await authenticate(session, body.numero_fiscal, body.password)
+
+    if user is None:
+        raise HTTPException(401, "invalid_credentials")
+
+    sso = await sessions.create(session, user, request)
+    it.user_id = user.id
+    await session.commit()  # session + interaction, together
+
+    response.set_cookie("__Host-session", str(sso.id), httponly=True, secure=True, samesite="lax", path="/")
+
+    return await view(session, it)
 
 @router.post("/interaction/{uid}/consent", response_model=InteractionView, responses={
     404: {"description": "Unknown or expired uid"},

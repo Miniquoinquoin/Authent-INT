@@ -159,9 +159,6 @@
           "429": {
             "description": "Rate limited"
           },
-          "501": {
-            "description": "Not built yet (B1)"
-          },
           "422": {
             "description": "Validation Error",
             "content": {
