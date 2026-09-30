@@ -1,0 +1,126 @@
+# Authent'INT — stack de développement.
+# Référence : docs/architecture.md §1.
+#
+# Un seul port publié sur l'hôte : caddy:443.
+# Prérequis — dans /etc/hosts de la machine :
+#   127.0.0.1 auth.authentint.local app.authentint.local impots.authentint.local cadastre.authentint.local
+
+# Environnement commun à auth-server et à migrate (même image, même Settings).
+x-auth-env: &auth-env
+  ISSUER: https://auth.authentint.local
+  PUBLIC_BASE_URL: https://app.authentint.local
+  KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:?KEY_ENCRYPTION_KEY vide dans .env, voir .env.example}
+  DATABASE_URL: postgresql+asyncpg://authentint_app:${POSTGRES_PASSWORD:-authentint}@postgres:5432/authentint
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+networks:
+  edge:
+    driver: bridge
+  data:
+    driver: bridge
+    internal: true # aucune passerelle, aucun accès sortant
+
+volumes:
+  caddy_data: # CA interne + certificats, générés par Caddy
+  pg_data: # données Postgres
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "443:443" # le seul port publié de toute la stack
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    networks:
+      edge:
+        aliases: # même URL pour le navigateur et pour les conteneurs
+          - auth.authentint.local
+          - app.authentint.local
+          - impots.authentint.local
+          - cadastre.authentint.local
+    healthcheck:
+      # Prêt quand la CA interne existe : les mocks en dépendent pour
+      # faire confiance au certificat d'auth.authentint.local.
+      test: ["CMD", "test", "-f", "/data/caddy/pki/authorities/local/root.crt"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  frontend:
+    build: ./apps/frontend
+    restart: unless-stopped
+    networks: [edge]
+
+  # One-shot : applique les migrations puis s'arrête. auth-server attend sa
+  # réussite. En Kubernetes, le même rôle est tenu par un Job (§12) : un seul
+  # processus migre, jamais trois réplicas en même temps.
+  migrate:
+    build: ./apps/auth-server
+    command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
+    environment: *auth-env
+    networks: [data]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  auth-server:
+    build: ./apps/auth-server
+    restart: unless-stopped
+    environment: *auth-env
+    networks: [edge, data] # le seul service sur les deux réseaux
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  svc-impots:
+    build: ./apps/mock-services
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: svc-impots
+      ISSUER: https://auth.authentint.local
+      AUDIENCE: svc-impots
+      CA_BUNDLE: /caddy-data/caddy/pki/authorities/local/root.crt
+    volumes:
+      - caddy_data:/caddy-data:ro # pour valider le TLS de Caddy
+    networks: [edge]
+    depends_on:
+      caddy:
+        condition: service_healthy
+
+  svc-cadastre:
+    build: ./apps/mock-services # même image, AUDIENCE différente
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: svc-cadastre
+      ISSUER: https://auth.authentint.local
+      AUDIENCE: svc-cadastre
+      CA_BUNDLE: /caddy-data/caddy/pki/authorities/local/root.crt
+    volumes:
+      - caddy_data:/caddy-data:ro
+    networks: [edge]
+    depends_on:
+      caddy:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: authentint_app
+      POSTGRES_DB: authentint
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-authentint}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks: [data] # invisible depuis l'hôte et depuis les mocks
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authentint_app -d authentint"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

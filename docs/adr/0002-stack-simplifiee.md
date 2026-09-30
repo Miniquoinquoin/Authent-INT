@@ -1319,6 +1319,10 @@ Par ordre d'impact. Aucune ne bloque le démarrage — c'est l'intérêt de
 11. **Cluster** — quel Ingress Controller est installé ? cert-manager est-il
     disponible ? Vault ou équivalent est-il imposé ? Un opérateur Postgres
     existe-t-il ?
+12. **Qui modifie le cadastre ?** `svc:cadastre.write` est défini (§7) mais
+    accordé à aucun rôle : un admin gère des comptes, pas des parcelles
+    (moindre privilège). Si ce sont les agents, c'est une ligne dans
+    `domain/scopes.py`.
 
 ---
 

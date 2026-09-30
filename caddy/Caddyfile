@@ -1,0 +1,52 @@
+# Authent'INT — point d'entrée unique de la stack.
+#
+# Caddy porte les quatre noms d'hôte publics et termine TLS pour tout le monde.
+# Les conteneurs internes l'atteignent par les mêmes noms, grâce aux alias
+# réseau déclarés sur le réseau `edge` (docs/architecture.md §1.1).
+
+{
+	# Autorité de certification interne, générée au premier démarrage dans
+	# /data. Pas d'ACME, pas d'Internet : la stack démarre hors ligne.
+	local_certs
+
+	# L'API d'administration n'a aucune raison d'être joignable ici.
+	admin off
+}
+
+# Réglages partagés par les quatre sites.
+(commun) {
+	encode gzip
+	header -Server
+	log {
+		output stdout
+		format console
+	}
+}
+
+# --- OpenID Provider -------------------------------------------------------
+# Ce nom est l'`issuer`. Le navigateur et les conteneurs l'utilisent tel quel.
+auth.authentint.local {
+	tls internal
+	import commun
+	reverse_proxy auth-server:8000
+}
+
+# --- SPA -------------------------------------------------------------------
+app.authentint.local {
+	tls internal
+	import commun
+	reverse_proxy frontend:80
+}
+
+# --- Resource Servers ------------------------------------------------------
+impots.authentint.local {
+	tls internal
+	import commun
+	reverse_proxy svc-impots:8001
+}
+
+cadastre.authentint.local {
+	tls internal
+	import commun
+	reverse_proxy svc-cadastre:8001
+}

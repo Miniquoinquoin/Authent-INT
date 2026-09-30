@@ -1,0 +1,18 @@
+# Developer overrides — opt-in via COMPOSE_FILE in .env (see .env.example).
+# Not loaded by plain `docker compose up`, so everyone else runs the image as built.
+services:
+  migrate:
+    volumes:
+      - ./apps/auth-server/alembic:/app/alembic # new migrations apply without a rebuild
+
+  auth-server:
+    command: ["uv", "run", "--no-sync", "uvicorn", "authentint.main:app",
+              "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    environment:
+      DEV: "true" # DEV ONLY — enables dev-only settings (fake LDAP fixture in config.py)
+    volumes:
+      - ./apps/auth-server/src:/app/src # src only: never overlay the host .venv
+      - ./apps/auth-server/alembic:/app/alembic # so `alembic revision --autogenerate` writes back to the host
+      - ./apps/auth-server/tests:/app/tests # tests are not in the image (.dockerignore): `make test` runs them here
+      - ./apps/auth-server/scripts:/app/scripts
+      - ./fixtures:/fixtures:ro # DEV ONLY — fake LDAP users for scripts/seed.py; never mount them in prod
