@@ -3,6 +3,7 @@ from pydantic import Field
 from typing import Literal
 from urllib.parse import unquote
 from joserfc.jwk import RSAKey
+from joserfc import jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.security import HTTPBasicCredentials
 
@@ -48,9 +49,11 @@ async def authenticate_client(session: AsyncSession, client_id: str, credentials
     return client
 
 def sign(claims: dict, key: RSAKey) -> str:
-    pass
+    header = {"alg": "RS256", "typ": "JWT", "kid": key.kid}
 
-async def access_claims(row, now) -> dict:
+    return jwt.encode(header, claims, key) # header.payload.signature
+
+def access_claims(row, now) -> dict:
     pass
 
 async def issue_refresh(session: AsyncSession, row) -> str:
