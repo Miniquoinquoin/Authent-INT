@@ -18,10 +18,12 @@ src/authentint/
 ├── keys/        RS256 keystore (next → active → retired) · POST /admin/keys/rotate
 ├── audit/       emit() · request_id middleware
 ├── users/ clients/ sessions/   queries.py per feature (routes to come)
-├── flows/       interaction · activation · reset (to come)
-└── oidc/        discovery · jwks · authorize (WIP) · codes · token (to come)
+├── flows/       interaction API (contract frozen, login/consent → B1) · activation · reset (B1)
+├── oidc/        discovery · jwks · authorize · codes · token (B2)
+└── ops/         /health/live · /health/ready
 alembic/         versioned migrations — a deliverable
-scripts/seed.py  dev only: 5 directory users + the portail-web client
+scripts/         seed.py (dev only) · export_openapi.py
+tests/           unit (no DB) · integration · security — one rolled-back transaction per test
 ```
 
 ## Running
@@ -30,15 +32,15 @@ Everything runs through Docker Compose from the repo root — see the root READM
 for the host setup (`/etc/hosts`, Caddy's CA).
 
 ```sh
-cp .env.example .env            # then fill KEY_ENCRYPTION_KEY (command in the file)
-docker compose up -d --build
-docker compose exec auth-server uv run --no-sync alembic upgrade head   # first run, and after each new migration
-docker compose restart auth-server                                      # the lifespan needs the tables
-docker compose exec auth-server uv run --no-sync python -m scripts.seed # dev only (needs docker-compose.dev.yml)
+cp .env.example .env   # then fill KEY_ENCRYPTION_KEY (command in the file)
+make up                # build, run the `migrate` one-shot, start, wait for healthchecks
+make seed              # dev only: 5 users (password in the output) + the portail-web client
+make test              # pytest inside the container, against the compose Postgres
+make openapi           # after touching a route: regenerate docs/generated/openapi.json
 ```
 
-Migrations are not applied at boot yet: on an empty database the app exits with
-`relation "signing_keys" does not exist`.
+Migrations run in the `migrate` service before `auth-server` starts, so a new
+file in `alembic/versions/` is applied by the next `make up`.
 
 `KEY_ENCRYPTION_KEY` encrypts the signing keys stored in Postgres. Changing it
 leaves the existing keys undecryptable: reset the database

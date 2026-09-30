@@ -1,8 +1,7 @@
 # Architecture actuelle de l'auth-server
 
-État de `apps/auth-server/src/authentint/` au commit
-`feat(auth-server): lay out the feature packages and start /authorize (WIP)`,
-comparé au commit précédent. La cible est décrite dans
+État de `apps/auth-server/src/authentint/` à la fin de **B0** (branche
+`chore/b0-baseline`). La cible est décrite dans
 [architecture.md](architecture.md) ; l'ordre de construction et le *pourquoi*
 de chaque fichier sont dans [learning-plan.md](learning-plan.md). Ce document
 dit **où on en est**.
@@ -18,9 +17,10 @@ Les briques de base sont écrites : configuration, domaine, mots de passe, rate
 limit, clés de signature, audit, annuaire. `/authorize` a ses vérifications
 dans l'ordre de l'ADR.
 
-**L'application démarre** (après `alembic upgrade head`) : discovery, JWKS et
-les deux premières vérifications de `/authorize` répondent. Le chemin « pas de
-session » de `/authorize` plante encore : voir [§6](#6-problèmes-connus).
+**B0 est terminé** : `make up` construit, migre et démarre la stack ; les
+quatre contrats de l'[ADR §17](adr/0002-stack-simplifiee.md#17-plan-de-construction--6-bricks)
+sont gelés ; 27 tests tournent en CI. Chaque brick B1–B6 peut démarrer en
+parallèle contre son faux : voir [§8](#8-les-couloirs--qui-prend-quoi).
 
 ---
 
@@ -145,13 +145,11 @@ flowchart TD
     classDef done fill:#d4edda,stroke:#2e7d32
     classDef stub fill:#fff3cd,stroke:#b8860b
     classDef missing fill:#f8d7da,stroke:#b71c1c,stroke-dasharray:4 3
-    class c1,c2,c3,err,rerr done
+    class c1,c2,c3,err,rerr,inter done
     class code stub
-    class inter missing
 ```
 
-Légende : vert = écrit · jaune = stub (`oidc/codes.py`, signature seulement) ·
-rouge pointillé = n'existe pas encore (`flows/interaction.py`).
+Légende : vert = écrit et testé · jaune = stub (`oidc/codes.py`, B2).
 
 **Pourquoi cet ordre.** Les étapes 1-2 passent avant tout le reste : rediriger
 vers un `redirect_uri` non vérifié, c'est envoyer le code ou l'erreur chez
@@ -194,33 +192,33 @@ quelqu'un monte le fichier en production, `DEV` vaut `False` par défaut et
 
 ---
 
-## 6. Problèmes connus
+## 6. Ce que B0 a gelé
 
-Vérifié sur la stack lancée (`docker compose up`, migration, seed, `curl`).
+Les contrats de l'[ADR §17](adr/0002-stack-simplifiee.md#b0--socle-et-contrats).
+**Les modifier, c'est une PR relue par les couloirs qui les consomment.**
 
-**Reste ouvert :**
+| Contrat | Où | Consommé par | Garde-fou |
+| --- | --- | --- | --- |
+| Schéma v1 | `alembic/versions/f93b4b48fcc6_initial_schema.py` | B1, B4 | appliqué par le service `migrate` à chaque `make up` |
+| ID token | `domain/claims.py` → `IdToken` | B2, frontend | `tests/unit/test_domain.py` |
+| Access token | `domain/claims.py` → `AccessToken` (RFC 9068, `typ: at+jwt`, `aud` = `domain.scopes.audiences()`) | B2 signe, B3 valide | idem : pas de `role` ni de donnée personnelle |
+| Scopes | `domain/scopes.py` → `OIDC_SCOPES`, `ALLOWED`, `grant()`, `audiences()` | B2, B3, B5 | idem |
+| Codes d'erreur OAuth | `domain/errors.py` → `AuthorizeErrorCode`, `TokenErrorCode` | B2, B5 | typés : un code hors RFC ne passe pas le typage |
+| API d'interaction | `flows/interaction.py` → `docs/generated/openapi.json` | B1 implémente, B5 mocke | CI échoue si `openapi.json` n'est pas régénéré (`make openapi`) |
 
-| Fichier | Problème |
+Aussi livré en B0 : service `migrate` (one-shot, rôle d'un Job Kubernetes),
+`/health/live` · `/health/ready`, healthcheck compose, `Makefile`, CI GitHub
+Actions, `tests/` (unit · integration · security) avec une transaction
+annulée par test.
+
+**Encore ouvert, à trancher :**
+
+| Sujet | Question |
 | --- | --- |
-| `oidc/authorize.py` | Chemin sans cookie : `NameError: interaction` → 500 (`flows/interaction.py` n'existe pas). Remplacé à l'étape 3 par `fake_authenticate()`, puis à l'étape 4 par le vrai `flows/interaction.py`. |
-| `oidc/codes.py` | `issue_code` et `consume_code` sont des `pass`. |
-| `oidc/token.py` | Docstring seulement, pas importé par `oidc/__init__.py`. |
-| démarrage | Les migrations ne tournent pas au boot : base vide → `relation "signing_keys" does not exist`. Lancer `alembic upgrade head` à la main (README de l'auth-server). |
-| `keys/routes.py` | `/admin/keys/rotate` est protégé par `svc:admin.users` : pas de scope dédié aux clés. |
-| `domain/scopes.py` | `svc:cadastre.write` est accordé à `admin` mais absent de [architecture.md §9](architecture.md#9-rôles-et-scopes). Choisir lequel fait foi. |
-| `flows/claims.py`, `flows/scopes.py` | Vides et redondants avec `domain/`. À supprimer. |
-
-**Corrigé dans `chore/b0-baseline` :**
-
-| Fichier | Correction |
-| --- | --- |
-| `main.py` | `RequestIdMiddleware` branché, `CORSMiddleware` remis (liste blanche `PUBLIC_BASE_URL`, jamais `*`). Le `router` fantôme avait déjà disparu. |
-| `config.py` | `public_base_url` déclaré : `authorize.py` l'utilise, le compose le fournit déjà. |
-| `oidc/discovery.py` | `scopes_supported` / `claims_supported` dérivés de `domain/` au lieu de `[...]` (500). |
-| `oidc/token.py` | Décorateur orphelin retiré (erreur de syntaxe). |
-| `audit/audit.py` | `occured_at` → `occurred_at`. |
-| `external/mailer.py` | `logging.getLogger(__name__)` au lieu de la fonction `log`. |
-| `domain/scopes.py` | (déjà corrigé avant cette branche) virgule de `Role.agent`, annotation de `grant()`. |
+| `domain/scopes.py` | `svc:cadastre.write` est accordé à `admin` mais absent de [architecture.md §9](architecture.md#9-rôles-et-scopes). Lequel fait foi ? |
+| `keys/routes.py` | `/admin/keys/rotate` est protégé par `svc:admin.users` : faut-il un scope `svc:admin.keys` ? |
+| `flows/claims.py`, `flows/scopes.py` | Vides, redondants avec `domain/`. À supprimer. |
+| `numero_fiscal` | « Chiffré au repos » (ADR §8), mais il faut le retrouver au login : chiffrement déterministe ou index aveugle (HMAC) ? Décision B1. |
 
 ---
 
@@ -228,47 +226,58 @@ Vérifié sur la stack lancée (`docker compose up`, migration, seed, `curl`).
 
 | Module | État |
 | --- | --- |
-| `config.py`, `infra/`, migration Alembic | fait |
-| `domain/` claims · scopes · errors | fait |
+| `config.py`, `infra/`, migration, service `migrate` | fait |
+| `domain/` claims · scopes · errors | fait, testé |
 | `security/` passwords · ratelimit · bearer | fait |
 | `external/` directory · mailer | fait |
-| `audit/` emit · middleware | fait, middleware branché |
+| `audit/` emit · middleware | fait, branché |
 | `keys/` keystore · routes | fait |
-| `clients/queries.py` | `get` seulement |
-| `sessions/queries.py` | `from_cookie` seulement — manque `create`, `list_for_user`, `revoke` |
-| `users/queries.py` | vide — manque `by_id`, `by_numero_fiscal` |
-| `*/routes.py` sauf `keys/` | vides |
-| `scripts/seed.py` + fixtures | fait |
-| `oidc/` discovery · jwks | fait |
-| `oidc/authorize.py` | vérifications écrites ; dépend de `issue_code` et `interaction` |
-| `oidc/codes.py`, `oidc/token.py` | stubs |
-| `oidc/` userinfo · revoke · end_session | manquants |
-| `flows/` interaction · activation · reset | manquants |
-| `ops/` | manquant |
-| `tests/` | vide |
+| `oidc/` discovery · jwks | fait, testé |
+| `oidc/authorize.py` | vérifications 1-7 faites et testées ; chemin SSO → `issue_code` (stub, B2) |
+| `flows/interaction.py` | `create` · `load` · `next_step` · `GET` faits ; `login` · `consent` → 501 (B1) |
+| `ops/` | `/health/live`, `/health/ready` ; `/metrics` manquant (B6) |
+| `oidc/` codes · token · userinfo · revoke · end_session | B2 |
+| `flows/` activation · reset | B1 |
+| `users/` · `clients/` · `sessions/` queries + routes `/me` `/admin` | B1 · B4 |
+| `apps/mock-services/` | stub qui répond 200 à tout (B3) |
+| frontend | écran de login de démonstration (B5) |
 
 ---
 
-## 8. Prochaines étapes
+## 8. Les couloirs — qui prend quoi
 
-Dans l'ordre du [learning plan](learning-plan.md) (étapes 13 à 17), chacune
-n'utilisant que ce que les précédentes ont construit :
+Chaque couloir **démarre contre un faux**, sur sa propre branche partie de
+`main`, et ouvre ses PR vers `main`. Personne n'attend personne : les faux
+disparaissent aux *seams*, à deux personnes. Détail et justification :
+[ADR §17](adr/0002-stack-simplifiee.md#les-bricks).
 
-1. ~~**Réparer le démarrage**~~ — fait dans `chore/b0-baseline`. Reste :
-   appliquer les migrations au boot (advisory lock, comme la clé initiale).
-2. **Requêtes** (section *`users/` · `clients/` · `sessions/`*) :
-   `users.by_numero_fiscal`, `users.by_id`, `sessions.create`.
-3. **`oidc/`** (section *`src/oidc/` — brick B2*), contre un
-   `fake_authenticate()` à la place d'`interaction.create` :
-   `issue_code` → `token.py` (échange du code atomique, PKCE, signature,
-   premier refresh token) → rotation du refresh token → `userinfo`, `revoke`,
-   `end_session`.
-4. **`flows/`** (section *`src/flows/` — brick B1*) : `interaction.py`
-   (`create`, `load`, `next_step`, login, consentement), qui remplace
-   `fake_authenticate()` ; puis `activation.py` et `reset.py`.
-5. **Routes `/me` et `/admin`** dans chaque fonctionnalité.
-6. **`ops/`** : `/health/live`, `/health/ready`, `/metrics`.
+| Couloir | Possède | Démarre contre | Première PR | Fini quand |
+| --- | --- | --- | --- | --- |
+| **B1 · Identité** | `flows/interaction.py` (`login`, `consent`), `flows/activation.py`, `flows/reset.py`, `users/queries.py`, `sessions.create` | `scripts/seed.py` + `fixtures/` | `POST /interaction/{uid}/login` : `DUMMY_HASH` à temps constant, verrouillage à 5 échecs, rate limit, cookie `__Host-session` | seed → activé → mot de passe vérifié, en pytest |
+| **B2 · Cœur OIDC** | `oidc/codes.py`, `oidc/token.py`, rotation refresh, `userinfo`, `revoke`, `end_session` | `fake_authenticate()` : crée une session pour un utilisateur seedé, à la place de `interaction.create` | `issue_code` + `/token` `authorization_code` (échange atomique, PKCE, signature `AccessToken`/`IdToken`) | smoke spec vert ; `docker compose up --scale auth-server=3` propre |
+| **B3 · Ressources** | `apps/mock-services/` : validation JWKS, `aud`, `scope` | un JWT signé à la main + un `jwks.json` commité | `GET /dossiers` : 401 sans jeton, 403 sous-scopé | `alg: none` rejeté ; jeton de `svc-cadastre` rejeté par `svc-impots` |
+| **B4 · Traçabilité** | `sessions/` (`/me/sessions`, `/admin/sessions`), `/me/audit`, `/admin/audit`, `users/routes.py` admin | les événements que `audit.emit` produit déjà | `GET /me/sessions` + `DELETE /me/sessions/{id}` | append-only vérifié par un test (`UPDATE audit_events` refusé) |
+| **B5 · Frontend** | `apps/frontend/` : étapes login/consentement, callback PKCE, portail, activation, reset, admin | MSW généré depuis `docs/generated/openapi.json` | machine à étapes pilotée par `GET /interaction/{uid}` → `prompt` | parcours Playwright vert contre le mock |
+| **B6 · Ops** | `/metrics`, k6, chart Helm, suite de régression sécurité | le système tel qu'il est | `/metrics` + un script k6 sur `/authorize` | rapport k6 ; assertions de sécurité vertes |
 
-En parallèle : un test par invariant de sécurité, à commencer par « un
-`redirect_uri` non enregistré donne une page d'erreur, jamais une
-redirection ».
+**Équipe réduite ?** Fusionner B3 dans B2 et B4 dans B1 (ADR §17).
+
+### Seams — quand un faux meurt
+
+| Seam | Faux supprimé | Porté par |
+| --- | --- | --- |
+| S1 | `fake_authenticate()` → `POST /interaction/{uid}/login` réel | B1 + B2 |
+| S2 | JWKS commité de B3 → `/.well-known/jwks.json` réel | B3 + B2 |
+| S3 | MSW → vraie API d'interaction | B5 + B1 |
+| S4 | données bouchonnées du front → vraies sessions et audit | B5 + B4 |
+
+### Règles de travail
+
+- Une branche par couloir et par sujet, nommée `b1/login`, `b2/token`… PR vers
+  `main`, CI verte obligatoire.
+- `make up` · `make test` · `make seed` · `make openapi` — rien d'autre à
+  connaître pour démarrer ([README de l'auth-server](../apps/auth-server/README.md)).
+- Un invariant de [architecture.md §15](architecture.md#15-invariants) = un
+  test dans `tests/security/`, écrit **avant** le code qui le respecte.
+- Toucher un contrat de [§6](#6-ce-que-b0-a-gelé) : prévenir les couloirs
+  consommateurs dans la PR.
