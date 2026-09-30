@@ -1,5 +1,7 @@
+import logging
 from typing import Protocol
-from logging import log
+
+log = logging.getLogger(__name__)
 
 # Defines an abstraction for the mailer so that it can be easily switched from console log to SMTP
 class Mailer(Protocol):

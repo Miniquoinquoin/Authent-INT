@@ -15,7 +15,7 @@ async def emit(session: AsyncSession, event_type: str, *, actor: UUID | None, ou
     assert not FORBIDDEN & detail.keys(), "auditing  with a secret in plain text"
 
     session.add(AuditEvents(
-        occured_at=datetime.now(UTC),
+        occurred_at=datetime.now(UTC),
         event_type=event_type,
         actor_user_id=actor,
         actor_ip=client_ip_var.get(),

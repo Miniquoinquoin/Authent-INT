@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     dev: bool = False  # DEV=true only via docker-compose.dev.yml; never in prod
     issuer: str
+    public_base_url: str  # SPA origin: /login redirect target and the only CORS origin
     database_url: str
     key_encryption_key: str
     access_token_ttl: int = 600

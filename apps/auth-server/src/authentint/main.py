@@ -1,8 +1,11 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from authentint import oidc
+from authentint.audit.middleware import RequestIdMiddleware
+from authentint.config import settings
 from authentint.infra import database as db
 from authentint.domain.errors import OAuthError, oauth_error_handler
 from authentint.keys import keystore
@@ -20,6 +23,15 @@ def create_app() -> FastAPI:
     # No Swagger UI for end users
     app = FastAPI(lifespan=lifespan, docs_url=None)
     app.add_exception_handler(OAuthError, oauth_error_handler)
+    app.add_middleware(RequestIdMiddleware)
+    # Added last = outermost: error responses get CORS headers too. Allow-list, never "*" (ADR §16)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[settings.public_base_url],
+        allow_credentials=True,  # the interaction endpoints set the __Host-session cookie
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
     app.include_router(oidc.router)
     app.include_router(keys_routes.router)
     return app

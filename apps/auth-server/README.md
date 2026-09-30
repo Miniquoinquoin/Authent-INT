@@ -1,71 +1,58 @@
 # auth-server
 
-FastAPI backend of Authent'INT. Today it is a **learning-stage JWT login API**, adapted from Eric Roby's YouTube video *"JWT Authentication for React and FastAPI"*. The final OpenID Provider described in `docs/architecture.md` will replace most of it; the layout (`src/authentint/infra/`, Alembic, uvicorn in Docker) is already the target one.
-
-## What was adapted from the video
-
-| Video | Here | Why |
-|---|---|---|
-| SQLite + sync SQLAlchemy | Postgres + async SQLAlchemy 2.0 (`asyncpg`) | The stack runs Postgres in Docker; the ADR mandates async |
-| `passlib` | `bcrypt` called directly | `passlib` is unmaintained and breaks with `bcrypt` ≥ 4.1 |
-| `Base.metadata.create_all()` at import | in the FastAPI `lifespan` | Async engine can't run sync DDL at import; Alembic will own the schema |
-| `database.py` / `models.py` at project root | `src/authentint/infra/` | Installable package, importable from Alembic and tests |
-| `localhost:8000` from the SPA | `https://auth.authentint.local` via Caddy | Only Caddy publishes a port; CORS allows `PUBLIC_BASE_URL` |
-| `python-jose`, `react-router-dom` | same, `react-router` | — |
+FastAPI OpenID Provider of Authent'INT. Target design: `docs/architecture.md`.
+Where the code stands today (what works, what is stubbed, what comes next):
+`docs/current_architecture.md`. Build order and the *why* of each file:
+`docs/learning-plan.md`.
 
 ## Layout
 
 ```
 src/authentint/
-├── main.py              FastAPI app, routes, JWT helpers
-└── infra/
-    ├── database.py      async engine, session factory, get_session() dependency
-    └── models.py        SQLAlchemy models (User)
-alembic/                 migrations — not initialised yet
-scripts/seed.py          empty for now
+├── main.py      app factory: routers, middlewares, lifespan (ensures a signing key)
+├── config.py    Settings, read and validated once at boot
+├── infra/       engine, session, SQLAlchemy models — nothing else
+├── domain/      claims · scopes · OAuth errors — pure, no I/O
+├── security/    Argon2id passwords · Postgres rate limit · Bearer verification
+├── external/    UserDirectory (JSON today, LDAP later) · Mailer (console today)
+├── keys/        RS256 keystore (next → active → retired) · POST /admin/keys/rotate
+├── audit/       emit() · request_id middleware
+├── users/ clients/ sessions/   queries.py per feature (routes to come)
+├── flows/       interaction · activation · reset (to come)
+└── oidc/        discovery · jwks · authorize (WIP) · codes · token (to come)
+alembic/         versioned migrations — a deliverable
+scripts/seed.py  dev only: 5 directory users + the portail-web client
 ```
-
-## How a request flows
-
-```
-POST /register  {username, password}
-  → get_user_by_username()  SELECT … WHERE username = ?   (400 if it exists)
-  → create_user()           bcrypt.hashpw → INSERT → commit
-
-POST /token  username=…&password=…   (OAuth2 password form)
-  → authenticate_user()     SELECT + bcrypt.checkpw          (401 on miss)
-  → create_access_token()   HS256 JWT {sub: username, exp: now+30 min}
-  ← {"access_token": …, "token_type": "bearer"}
-
-GET /verify-token/{token}
-  → jwt.decode()            403 if bad signature / expired
-```
-
-**Sessions.** One `AsyncSession` per request, opened and closed by `get_session()` (`infra/database.py`) and injected with `Depends(get_session)`. Queries use `select()` + `await db.scalar(...)`; every call to an `async def` is awaited — a missing `await` returns a coroutine object, which is always truthy and silently breaks `if user:` checks.
-
-**Passwords** are stored as bcrypt hashes. **Tokens** are symmetric HS256 with a placeholder `SECRET_KEY` in `main.py` — fine for the exercise, to be replaced by the asymmetric keystore of the real OP.
 
 ## Running
 
-Everything runs through Docker Compose from the repo root — see the root README for the host setup (`/etc/hosts`, Caddy's CA).
+Everything runs through Docker Compose from the repo root — see the root README
+for the host setup (`/etc/hosts`, Caddy's CA).
 
 ```sh
-docker compose up -d --build auth-server        # immutable image, uvicorn on :8000 behind Caddy
-docker compose logs -f auth-server
+cp .env.example .env            # then fill KEY_ENCRYPTION_KEY (command in the file)
+docker compose up -d --build
+docker compose exec auth-server uv run --no-sync alembic upgrade head   # first run, and after each new migration
+docker compose restart auth-server                                      # the lifespan needs the tables
+docker compose exec auth-server uv run --no-sync python -m scripts.seed # dev only (needs docker-compose.dev.yml)
 ```
 
-Dev loop with live reload: put `COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml` in `.env` (copy `.env.example`). `docker-compose.dev.yml` bind-mounts `src/` into the container and runs uvicorn with `--reload`. Rebuild only when `uv.lock` changes.
+Migrations are not applied at boot yet: on an empty database the app exits with
+`relation "signing_keys" does not exist`.
 
-Environment, injected by compose: `DATABASE_URL` (`postgresql+asyncpg://…@postgres/…`), `PUBLIC_BASE_URL` (the SPA origin, used for CORS), `ISSUER`, `LOG_LEVEL`.
+`KEY_ENCRYPTION_KEY` encrypts the signing keys stored in Postgres. Changing it
+leaves the existing keys undecryptable: reset the database
+(`docker compose down -v`) rather than rotating it in dev.
+
+Dev loop with live reload: keep `COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml`
+in `.env`. `docker-compose.dev.yml` bind-mounts `src/` and `alembic/`, runs uvicorn
+with `--reload`, sets `DEV=true` and mounts the fake directory. Rebuild only when
+`uv.lock` changes.
 
 ## Try it
 
-Swagger UI: `https://auth.authentint.local/docs`. Or from the shell:
-
 ```sh
-curl -k https://auth.authentint.local/register -H 'Content-Type: application/json' \
-     -d '{"username":"alice","password":"correct-horse"}'
-curl -k https://auth.authentint.local/token -d 'username=alice&password=correct-horse'
+R="--resolve auth.authentint.local:443:127.0.0.1"   # unnecessary if /etc/hosts is set
+curl -sk $R https://auth.authentint.local/.well-known/openid-configuration
+curl -sk $R https://auth.authentint.local/.well-known/jwks.json
 ```
-
-There is no default user — the `users` table starts empty.

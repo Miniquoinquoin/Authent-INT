@@ -18,7 +18,9 @@ Les briques de base sont écrites : configuration, domaine, mots de passe, rate
 limit, clés de signature, audit, annuaire. `/authorize` a ses vérifications
 dans l'ordre de l'ADR.
 
-**L'application ne démarre pas encore** : voir [§6](#6-problèmes-connus).
+**L'application démarre** (après `alembic upgrade head`) : discovery, JWKS et
+les deux premières vérifications de `/authorize` répondent. Le chemin « pas de
+session » de `/authorize` plante encore : voir [§6](#6-problèmes-connus).
 
 ---
 
@@ -194,19 +196,31 @@ quelqu'un monte le fichier en production, `DEV` vaut `False` par défaut et
 
 ## 6. Problèmes connus
 
-Ce qui empêche l'app de démarrer ou casse au premier appel :
+Vérifié sur la stack lancée (`docker compose up`, migration, seed, `curl`).
+
+**Reste ouvert :**
 
 | Fichier | Problème |
 | --- | --- |
-| `main.py` | `@router.post("/admin/keys/rotate")` utilise un `router` qui n'existe pas dans ce fichier, et fait doublon avec `keys/routes.py`. À supprimer. Aucun `app.include_router(...)` n'est encore appelé, `RequestIdMiddleware` n'est pas branché, et le `CORSMiddleware` de l'ancienne version a disparu. |
-| `oidc/authorize.py` | `interaction` n'est pas importé (`flows/interaction.py` n'existe pas). |
+| `oidc/authorize.py` | Chemin sans cookie : `NameError: interaction` → 500 (`flows/interaction.py` n'existe pas). Remplacé à l'étape 3 par `fake_authenticate()`, puis à l'étape 4 par le vrai `flows/interaction.py`. |
 | `oidc/codes.py` | `issue_code` et `consume_code` sont des `pass`. |
-| `oidc/token.py` | `@router.post` sans chemin ni fonction : erreur de syntaxe à l'import. |
-| `oidc/discovery.py` | `scopes_supported` et `claims_supported` valent `[...]` (`Ellipsis`), non sérialisable en JSON. |
-| `audit/audit.py` | `occured_at=` au lieu de `occurred_at=` (nom de la colonne) → `TypeError` au premier `emit`. |
-| `external/mailer.py` | `from logging import log` importe une *fonction* ; `log.info(...)` plante. Utiliser `logging.getLogger(__name__)`. |
-| `domain/scopes.py` | Virgule manquante dans `Role.agent` : `"svc:cadastre.read" "svc:impots.write"` devient **un seul** scope. `grant()` est annoté `-> bool` mais renvoie un `set`. |
+| `oidc/token.py` | Docstring seulement, pas importé par `oidc/__init__.py`. |
+| démarrage | Les migrations ne tournent pas au boot : base vide → `relation "signing_keys" does not exist`. Lancer `alembic upgrade head` à la main (README de l'auth-server). |
+| `keys/routes.py` | `/admin/keys/rotate` est protégé par `svc:admin.users` : pas de scope dédié aux clés. |
+| `domain/scopes.py` | `svc:cadastre.write` est accordé à `admin` mais absent de [architecture.md §9](architecture.md#9-rôles-et-scopes). Choisir lequel fait foi. |
 | `flows/claims.py`, `flows/scopes.py` | Vides et redondants avec `domain/`. À supprimer. |
+
+**Corrigé dans `chore/b0-baseline` :**
+
+| Fichier | Correction |
+| --- | --- |
+| `main.py` | `RequestIdMiddleware` branché, `CORSMiddleware` remis (liste blanche `PUBLIC_BASE_URL`, jamais `*`). Le `router` fantôme avait déjà disparu. |
+| `config.py` | `public_base_url` déclaré : `authorize.py` l'utilise, le compose le fournit déjà. |
+| `oidc/discovery.py` | `scopes_supported` / `claims_supported` dérivés de `domain/` au lieu de `[...]` (500). |
+| `oidc/token.py` | Décorateur orphelin retiré (erreur de syntaxe). |
+| `audit/audit.py` | `occured_at` → `occurred_at`. |
+| `external/mailer.py` | `logging.getLogger(__name__)` au lieu de la fonction `log`. |
+| `domain/scopes.py` | (déjà corrigé avant cette branche) virgule de `Role.agent`, annotation de `grant()`. |
 
 ---
 
@@ -215,17 +229,17 @@ Ce qui empêche l'app de démarrer ou casse au premier appel :
 | Module | État |
 | --- | --- |
 | `config.py`, `infra/`, migration Alembic | fait |
-| `domain/` claims · scopes · errors | fait (bug de virgule, §6) |
+| `domain/` claims · scopes · errors | fait |
 | `security/` passwords · ratelimit · bearer | fait |
-| `external/` directory · mailer | fait (bug du logger, §6) |
-| `audit/` emit · middleware | fait (bug de nom de colonne, middleware non branché) |
+| `external/` directory · mailer | fait |
+| `audit/` emit · middleware | fait, middleware branché |
 | `keys/` keystore · routes | fait |
 | `clients/queries.py` | `get` seulement |
 | `sessions/queries.py` | `from_cookie` seulement — manque `create`, `list_for_user`, `revoke` |
 | `users/queries.py` | vide — manque `by_id`, `by_numero_fiscal` |
 | `*/routes.py` sauf `keys/` | vides |
 | `scripts/seed.py` + fixtures | fait |
-| `oidc/` discovery · jwks | fait (`[...]` dans discovery, §6) |
+| `oidc/` discovery · jwks | fait |
 | `oidc/authorize.py` | vérifications écrites ; dépend de `issue_code` et `interaction` |
 | `oidc/codes.py`, `oidc/token.py` | stubs |
 | `oidc/` userinfo · revoke · end_session | manquants |
@@ -240,8 +254,8 @@ Ce qui empêche l'app de démarrer ou casse au premier appel :
 Dans l'ordre du [learning plan](learning-plan.md) (étapes 13 à 17), chacune
 n'utilisant que ce que les précédentes ont construit :
 
-1. **Réparer le démarrage** : les points de §6, puis `include_router` pour
-   `oidc` et `keys`, et le middleware d'audit.
+1. ~~**Réparer le démarrage**~~ — fait dans `chore/b0-baseline`. Reste :
+   appliquer les migrations au boot (advisory lock, comme la clé initiale).
 2. **Requêtes** (section *`users/` · `clients/` · `sessions/`*) :
    `users.by_numero_fiscal`, `users.by_id`, `sessions.create`.
 3. **`oidc/`** (section *`src/oidc/` — brick B2*), contre un
