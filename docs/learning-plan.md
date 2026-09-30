@@ -318,12 +318,17 @@ apps/auth-server/
 ├── alembic/                3. schéma v1 (contrat B0)
 ├── src/authentint/
 │   ├── main.py             4. app FastAPI, lifespan, routers
-│   ├── infra/              5. settings · db · password · directory · mailer · keystore · ratelimit
+│   ├── config.py           5. Settings
+│   ├── infra/                 database · models — rien d'autre
+│   ├── security/              passwords · ratelimit · bearer
+│   ├── external/              directory · mailer
+│   ├── keys/                  keystore · /admin/keys/rotate
 │   ├── domain/             6. pydantic : claims, scopes, erreurs — zéro I/O
 │   ├── audit/              7. emit() + middleware request_id
 │   ├── flows/              8. interaction · activation · reset      (B1)
 │   ├── oidc/               9. discovery · jwks · authorize · token · userinfo · revoke · end_session (B2)
-│   └── admin/             10. users · clients · keys · audit        (B4)
+│   ├── users/ clients/ sessions/  10. queries.py + /me · /admin      (B4)
+│   └── ops/                   /health/* · /metrics
 ├── scripts/seed.py         make seed
 └── tests/
 ```
@@ -511,6 +516,12 @@ chose est au mauvais endroit.
 
 ### `src/infra/` — ce qui touche le monde extérieur
 
+> **Où c'est rangé dans le code.** Cette section décrit les *ports* vers
+> l'extérieur. Dans le code, ils sont répartis par rôle (voir
+> [current_architecture.md §3](current_architecture.md#3-qui-a-le-droit-dimporter-qui)) :
+> `config.py`, `infra/database.py`, `security/`, `external/`, `keys/`.
+> `infra/` ne garde que la connexion et les modèles.
+
 **Le problème.** Le code métier doit pouvoir dire « vérifie ce mot de passe »,
 « trouve cet utilisateur », « envoie ce mail » sans savoir *comment*. Parce que
 le *comment* va changer : le JSON deviendra un LDAP, la console deviendra un
@@ -526,7 +537,7 @@ Le code métier reçoit un `RateLimiter` par injection de dépendance FastAPI
 **Comment on s'en sert ici.** Un fichier par port, chaque fichier = le
 `Protocol` + son implémentation unique d'aujourd'hui.
 
-#### `settings.py`
+#### `config.py`
 
 ```python
 from pydantic_settings import BaseSettings
@@ -549,7 +560,7 @@ renvoie `None` et plante deux heures plus tard.
 
 - <https://docs.pydantic.dev/latest/concepts/pydantic_settings/>
 
-#### `db.py`
+#### `infra/database.py`
 
 ```python
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
@@ -571,7 +582,7 @@ async.
 - <https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html>
 - Modèles 2.0 (`Mapped[]`, `mapped_column`) : <https://docs.sqlalchemy.org/en/20/orm/declarative_tables.html>
 
-#### `password.py`
+#### `security/passwords.py`
 
 ```python
 import asyncio, hashlib
@@ -606,7 +617,7 @@ thread, seule celle-ci attend ([M4](#m4--python-async-fastapi-pydantic)).
 
 - <https://argon2-cffi.readthedocs.io/en/stable/api.html>
 
-#### `directory.py`
+#### `external/directory.py`
 
 Le `Protocol` `UserDirectory` et `DirectoryUser` sont **écrits dans
 [ADR §6](adr/0002-stack-simplifiee.md#le-port-reste-le-même)** : les recopier.
@@ -614,7 +625,7 @@ Le `Protocol` `UserDirectory` et `DirectoryUser` sont **écrits dans
 `numero_fiscal`. Aucune méthode d'écriture : l'annuaire est en lecture seule
 *par construction*.
 
-#### `mailer.py`
+#### `external/mailer.py`
 
 ```python
 class Mailer(Protocol):
@@ -628,7 +639,7 @@ class ConsoleMailer:
 Le lien d'activation apparaît dans `docker compose logs auth-server`. C'est
 tout ce qu'il faut pour développer et démontrer.
 
-#### `keystore.py`
+#### `keys/keystore.py`
 
 **Le problème.** Il faut une clé privée RSA pour signer, la clé publique
 correspondante publiée dans le JWKS, et pouvoir en changer sans casser les
@@ -669,7 +680,7 @@ attrape.
 - Advisory locks : <https://www.postgresql.org/docs/16/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS>
 - Fernet : <https://cryptography.io/en/latest/fernet/>
 
-#### `ratelimit.py`
+#### `security/ratelimit.py`
 
 ```python
 class RateLimiter(Protocol):
@@ -929,7 +940,10 @@ est vert.
 
 Concepts : [M7](#m7--oauth-20-et-pkce), [M8](#m8--openid-connect), [M9](#m9--jwt-jwks-et-rotation-des-clés).
 
-### `src/admin/` — brick B4
+### Routes `/admin/*` — brick B4
+
+> Pas de dossier `admin/` : chaque fonctionnalité porte ses routes admin
+> (`users/routes.py`, `clients/routes.py`, `sessions/routes.py`, `keys/routes.py`).
 
 **Le problème.** Les écrans admin (CRUD utilisateurs, audit, rotation de clé)
 sont des routes protégées par un scope. Elles doivent vérifier le Bearer
@@ -1704,7 +1718,7 @@ des comptes. Même réponse, même temps.
 
 **Savoir faire à la fin :** hacher avec Argon2id (paramètres calibrés), stocker haché tout jeton d'activation / reset / code / refresh, rendre les endpoints `request` non-oracles (même réponse, même temps), verrouiller un compte avec backoff.
 
-**Construit :** [infra/password.py](#passwordpy), [flows/](#srcflows--brick-b1).
+**Construit :** [security/passwords.py](#securitypasswordspy), [flows/](#srcflows--brick-b1).
 
 **Prépare :** [ADR §6 — magasin de credentials](adr/0002-stack-simplifiee.md#ce-que-la-lecture-seule-implique-sur-les-mots-de-passe), [ADR §8 — règle absolue](adr/0002-stack-simplifiee.md#credentials-et-récupération), [ADR §9 — cycle de vie du compte](adr/0002-stack-simplifiee.md#cycle-de-vie-du-compte), brick **B1**. **Dépend de :** [M3](#m3--http-cookies-cors-csp), [M5](#m5--postgres-sqlalchemy-20-alembic).
 
@@ -1799,7 +1813,7 @@ pour qu'aucun jeton en circulation ne devienne invalide.
 
 **Savoir faire à la fin :** signer un JWT RS256 avec `kid`, publier un JWKS, le vérifier côté Resource Server avec l'algorithme **épinglé**, forger un `alg: none` et un HS256-avec-clé-publique et les voir rejetés, faire tourner une clé sans invalider un jeton.
 
-**Construit :** [oidc/](#srcoidc--brick-b2-le-cœur), [infra/keystore.py](#keystorepy), [mock-services](#appsmock-services--les-resource-servers).
+**Construit :** [oidc/](#srcoidc--brick-b2-le-cœur), [keys/keystore.py](#keyskeystorepy), [mock-services](#appsmock-services--les-resource-servers).
 
 **Prépare :** [ADR §11](adr/0002-stack-simplifiee.md#11-jwks--le-mécanisme-à-comprendre), [ADR §12](adr/0002-stack-simplifiee.md#12-rotation-des-clés--sans-cronjob), [architecture.md §3, §6](architecture.md#3-accès-à-un-service-et-validation-jwks), bricks **B2** et **B3**. **Dépend de :** [M8](#m8--openid-connect), [M2](#m2--caddy-tls-et-noms-dhôte).
 
