@@ -1,5 +1,3 @@
-import time
-
 from pydantic import BaseModel
 from pydantic import Field
 from typing import Literal
@@ -75,7 +73,7 @@ def id_claims(row: OAuthAuthorizationCodes, user: User, now: int) -> dict:
         amr=row.amr,
         sid=row.session_id,
         name=f"{user.prenom} {user.nom}",
-        given_name=" ",
+        given_name=user.prenom,
         family_name=user.nom,
         role=user.role
     )
