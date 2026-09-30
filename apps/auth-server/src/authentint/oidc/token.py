@@ -1,3 +1,5 @@
+import secrets
+
 from pydantic import BaseModel
 from pydantic import Field
 from typing import Literal
@@ -14,8 +16,10 @@ from authentint.infra.models.oauth import ClientType
 from authentint.infra.models.identity import User
 from authentint.domain.errors import OAuthError
 from authentint.domain.claims import IdToken
+from authentint.domain.claims import AccessToken
 from authentint.clients import queries as clients
 from authentint.security.passwords import verify_password
+from authentint.domain.scopes import audiences
 
 
 class TokenBody(BaseModel):
@@ -51,8 +55,8 @@ async def authenticate_client(session: AsyncSession, client_id: str, credentials
 
     return client
 
-def sign(claims: dict, key: RSAKey) -> str:
-    header = {"alg": "RS256", "typ": "JWT", "kid": key.kid}
+def sign(claims: dict, key: RSAKey, typ: str = "JWT") -> str:
+    header = {"alg": "RS256", "typ": typ, "kid": key.kid}
 
     return jwt.encode(header, claims, key) # header.payload.signature
 
@@ -80,8 +84,21 @@ def id_claims(row: OAuthAuthorizationCodes, user: User, now: int) -> dict:
 
     return id_token.model_dump(mode="json")
 
-def access_claims(row, now) -> dict:
-    pass
+def access_claims(row: OAuthAuthorizationCodes, now: int) -> dict:
+    access_token = AccessToken(
+        iss=settings.issuer,
+        sub=row.user_id,
+        aud=audiences(set(row.scope.split())),
+        client_id=row.client_id,
+        scope=row.scope,
+        exp=now + settings.access_token_ttl,
+        iat=now,
+        jti=secrets.token_urlsafe(16),
+        sid=row.session_id,
+        acr=row.acr
+    )
+
+    return access_token.model_dump(mode="json")
 
 async def issue_refresh(session: AsyncSession, row) -> str:
     pass

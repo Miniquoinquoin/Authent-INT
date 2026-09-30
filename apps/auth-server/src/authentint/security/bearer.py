@@ -18,6 +18,8 @@ bearer = HTTPBearer()
 async def verify_access_token(session: AsyncSession, token: str) -> dict:
     try:
         tok = jwt.decode(token, KeySet.import_key_set(await keystore.jwks(session)), algorithms=["RS256"])
+        if tok.header.get("typ") != "at+jwt":
+            raise HTTPException(401, "invalid_token")
         jwt.JWTClaimsRegistry(
             iss={"essential": True, "value": settings.issuer},
             exp={"essential": True},
