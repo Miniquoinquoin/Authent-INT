@@ -692,6 +692,8 @@ Un seul processus doit générer la clé initiale : advisory lock Postgres. Sans
 
 ## 13. Arborescence
 
+Arborescence cible. Ce qui existe déjà, ce qui a changé et pourquoi : [current_architecture.md](current_architecture.md).
+
 ```
 authentint/
 ├── README.md
