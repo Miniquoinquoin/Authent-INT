@@ -5,6 +5,7 @@ from fastapi import Request
 from fastapi import Depends
 from fastapi.responses import RedirectResponse
 from typing import Literal
+from urllib.parse import urlencode
 
 from . import router
 from authentint.config import settings
@@ -57,4 +58,7 @@ async def authorize(request: Request, session=Depends(get_session)):
 
         return RedirectResponse(f"{settings.public_base_url}/login?uid={it.uid}", 302)
 
-    return await issue_code(session, params, sso)
+    oauth_auth_code = await issue_code(session, params, sso)
+    redirect_url = f"{params.redirect_uri}{"&" if "?" in params.redirect_uri else "?"}{urlencode({"code": oauth_auth_code, "state": params.state})}"
+
+    return RedirectResponse(redirect_url, 302)

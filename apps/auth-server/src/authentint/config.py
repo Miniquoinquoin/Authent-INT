@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     access_token_ttl: int = 600
     id_token_ttl: int = 300
     otp_ttl: int = 30
+    code_ttl: int = 60
     fixtures_path: str | None = None  # fake LDAP directory for scripts/seed.py, dev only
 
     @model_validator(mode="after")
