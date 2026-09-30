@@ -215,10 +215,15 @@ annulée par test.
 
 | Sujet | Question |
 | --- | --- |
-| `domain/scopes.py` | `svc:cadastre.write` est accordé à `admin` mais absent de [architecture.md §9](architecture.md#9-rôles-et-scopes). Lequel fait foi ? |
 | `keys/routes.py` | `/admin/keys/rotate` est protégé par `svc:admin.users` : faut-il un scope `svc:admin.keys` ? |
-| `flows/claims.py`, `flows/scopes.py` | Vides, redondants avec `domain/`. À supprimer. |
 | `numero_fiscal` | « Chiffré au repos » (ADR §8), mais il faut le retrouver au login : chiffrement déterministe ou index aveugle (HMAC) ? Décision B1. |
+
+**Tranché :** `svc:cadastre.write` n'est accordé à **aucun** rôle, conformément
+à [architecture.md §9](architecture.md#9-rôles-et-scopes). Un admin gère des
+comptes, pas des parcelles (moindre privilège). Qui modifie le cadastre est
+posé au client ([ADR §18](adr/0002-stack-simplifiee.md#18-questions-pour-le-client), q.12) ;
+le test `test_nobody_edits_the_cadastre_until_the_client_decides` change avec
+la réponse.
 
 ---
 

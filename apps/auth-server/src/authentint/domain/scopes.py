@@ -5,9 +5,11 @@ from authentint.infra.models.oauth import OAuthClients
 # Standard OIDC scopes: they describe the identity itself, so every role may receive them (ADR §7)
 OIDC_SCOPES: frozenset[str] = frozenset({"openid", "profile", "email", "offline_access"})
 
-# Defines allowed service scopes for each role
+# Defines allowed service scopes for each role (architecture.md §9).
+# svc:cadastre.write exists but is granted to nobody: editing the land registry is a business right,
+# not an IT one, so admin doesn't get it. Who does is a question for the client (ADR §18, q.12).
 ALLOWED: dict[Role, frozenset[str]] = {
-    Role.admin: frozenset({"svc:admin.users", "svc:admin.audit", "svc:cadastre.write", "svc:cadastre.read", "svc:impots.write", "svc:impots.read"}),
+    Role.admin: frozenset({"svc:admin.users", "svc:admin.audit", "svc:cadastre.read", "svc:impots.write", "svc:impots.read"}),
     Role.agent: frozenset({"svc:cadastre.read", "svc:impots.write", "svc:impots.read"}),
     Role.contribuable: frozenset({"svc:impots.read"})
 }

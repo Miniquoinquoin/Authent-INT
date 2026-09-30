@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from authentint.domain.claims import AccessToken
 from authentint.domain.claims import IdToken
 from authentint.domain.errors import redirect_error
+from authentint.domain.scopes import ALLOWED
 from authentint.domain.scopes import audiences
 from authentint.domain.scopes import grant
 from authentint.infra.models.identity import Role
@@ -29,6 +30,13 @@ def test_client_caps_the_scopes():
 
 def test_admin_scopes_never_reach_an_agent():
     assert grant({"svc:admin.users"}, Role.agent, CLIENT) == set()
+
+def test_admin_has_every_agent_scope():
+    assert ALLOWED[Role.agent] <= ALLOWED[Role.admin]  # architecture.md §9
+
+def test_nobody_edits_the_cadastre_until_the_client_decides():
+    # ADR §18 q.12: change this test together with ALLOWED once the client answers
+    assert not any("svc:cadastre.write" in scopes for scopes in ALLOWED.values())
 
 def test_one_audience_per_service():
     assert audiences({"openid", "svc:impots.read", "svc:impots.write", "svc:cadastre.read"}) == ["svc-cadastre", "svc-impots"]
