@@ -1,3 +1,5 @@
+import time
+
 from pydantic import BaseModel
 from pydantic import Field
 from typing import Literal
@@ -9,8 +11,11 @@ from fastapi.security import HTTPBasicCredentials
 
 from authentint.config import settings
 from authentint.infra.models.oauth import OAuthClients
+from authentint.infra.models.oauth import OAuthAuthorizationCodes
 from authentint.infra.models.oauth import ClientType
+from authentint.infra.models.identity import User
 from authentint.domain.errors import OAuthError
+from authentint.domain.claims import IdToken
 from authentint.clients import queries as clients
 from authentint.security.passwords import verify_password
 
@@ -52,6 +57,30 @@ def sign(claims: dict, key: RSAKey) -> str:
     header = {"alg": "RS256", "typ": "JWT", "kid": key.kid}
 
     return jwt.encode(header, claims, key) # header.payload.signature
+
+def id_claims(row: OAuthAuthorizationCodes, user: User, now: int) -> dict:
+    """
+    Builds the ID token's content to be addressed to the client app (portail-web)
+    """
+
+    id_token = IdToken(
+        iss=settings.issuer,
+        sub=row.user_id,
+        aud=row.client_id,
+        exp=now + settings.id_token_ttl,
+        iat=now,
+        auth_time=int(row.auth_time.timestamp()),
+        nonce=row.nonce,
+        acr=row.acr,
+        amr=row.amr,
+        sid=row.session_id,
+        name=f"{user.prenom} {user.nom}",
+        given_name=" ",
+        family_name=user.nom,
+        role=user.role
+    )
+
+    return id_token.model_dump(mode="json")
 
 def access_claims(row, now) -> dict:
     pass
