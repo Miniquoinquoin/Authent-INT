@@ -17,8 +17,8 @@ logs:
 seed:     ## dev only: 5 users + the portail-web client
 	$(EXEC) python -m scripts.seed
 
-test:
-	$(EXEC) pytest
+test:     ## all tests, or one file: make test T=tests/integration/test_users.py
+	$(EXEC) pytest $(T)
 
 openapi:  ## regenerate the interaction-API contract (docs/generated/openapi.json)
 	$(EXEC) python -m scripts.export_openapi > docs/generated/openapi.json

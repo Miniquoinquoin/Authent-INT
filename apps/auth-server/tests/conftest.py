@@ -14,9 +14,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from authentint.infra.database import engine
 from authentint.infra.database import get_session
+from authentint.infra.models.identity import Role
+from authentint.infra.models.identity import User
+from authentint.infra.models.identity import UserStatus
 from authentint.infra.models.oauth import ClientType
 from authentint.infra.models.oauth import OAuthClients
 from authentint.main import create_app
+from authentint.security.passwords import hash_password
+
+
+ALICE_PASSWORD = "correct-horse-battery"
 
 
 @pytest.fixture
@@ -44,6 +51,17 @@ async def spa(s) -> OAuthClients:
     s.add(c)
     await s.flush()
     return c
+
+@pytest.fixture
+async def alice(s) -> User:
+    """An active contribuable whose password is ALICE_PASSWORD."""
+
+    u = User(external_id="test-alice", numero_fiscal="1801234567890", email="alice@example.test",
+             nom="Martin", prenom="Alice", password_hash=await hash_password(ALICE_PASSWORD),
+             role=Role.contribuable, status=UserStatus.active)
+    s.add(u)
+    await s.flush()
+    return u
 
 @pytest.fixture
 def authorize_params(spa):
