@@ -53,6 +53,10 @@ async def spa(s) -> OAuthClients:
     return c
 
 @pytest.fixture
+def alice_password() -> str:
+    return ALICE_PASSWORD
+
+@pytest.fixture
 async def alice(s) -> User:
     """An active contribuable whose password is ALICE_PASSWORD."""
 
