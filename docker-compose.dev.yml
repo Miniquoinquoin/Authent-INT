@@ -14,4 +14,5 @@ services:
       - ./apps/auth-server/src:/app/src # src only: never overlay the host .venv
       - ./apps/auth-server/alembic:/app/alembic # so `alembic revision --autogenerate` writes back to the host
       - ./apps/auth-server/tests:/app/tests # tests are not in the image (.dockerignore): `make test` runs them here
-      - ./apps/auth-server/scripts:/app/scripts      - ./fixtures:/fixtures:ro # DEV ONLY — fake LDAP users for scripts/seed.py; never mount them in prod
+      - ./apps/auth-server/scripts:/app/scripts
+      - ./fixtures:/fixtures:ro # DEV ONLY — fake LDAP users for scripts/seed.py; never mount them in prod
