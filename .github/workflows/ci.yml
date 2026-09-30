@@ -1,0 +1,36 @@
+# B0 (ADR §17): pytest runs on every push, against the real stack.
+# Same commands as a developer's machine: cp .env.example, make up, make test.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: .env from the example, with a throwaway encryption key
+        run: |
+          cp .env.example .env
+          key=$(python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
+          sed -i "s|^KEY_ENCRYPTION_KEY=.*|KEY_ENCRYPTION_KEY=$key|" .env
+
+      - name: Build, migrate, start (waits for every healthcheck)
+        run: make up
+
+      - name: pytest
+        run: make test
+
+      - name: The interaction contract is up to date
+        run: |
+          make openapi
+          git diff --exit-code docs/generated/ || { echo "::error::run 'make openapi' and commit docs/generated/openapi.json"; exit 1; }
+
+      - name: Logs
+        if: failure()
+        run: docker compose logs
