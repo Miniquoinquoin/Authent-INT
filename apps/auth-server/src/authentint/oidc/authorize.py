@@ -14,6 +14,7 @@ from authentint.sessions.queries import from_cookie
 from authentint.domain.errors import error_page
 from authentint.domain.errors import redirect_error
 from authentint.oidc.codes import issue_code
+from authentint.flows import interaction
 
 
 class AuthorizeParams(BaseModel):

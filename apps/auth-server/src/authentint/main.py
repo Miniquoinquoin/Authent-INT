@@ -3,7 +3,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from authentint import flows
 from authentint import oidc
+from authentint import ops
 from authentint.audit.middleware import RequestIdMiddleware
 from authentint.config import settings
 from authentint.infra import database as db
@@ -33,7 +35,9 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type"],
     )
     app.include_router(oidc.router)
+    app.include_router(flows.router)
     app.include_router(keys_routes.router)
+    app.include_router(ops.router)
     return app
 
 app = create_app()
