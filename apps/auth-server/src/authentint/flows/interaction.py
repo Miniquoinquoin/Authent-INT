@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import router
 from authentint.config import settings
 from authentint.clients import queries as clients
+from authentint.flows.login import AccountLocked
 from authentint.flows.login import authenticate
 from authentint.infra.database import get_session
 from authentint.sessions import queries as sessions
@@ -118,9 +119,13 @@ async def login(uid: str, body: LoginBody, request: Request, response: Response,
     """On success, sets the `__Host-session` cookie and answers the next step."""
 
     it = await load(session, uid)
-    user = await authenticate(session, body.numero_fiscal, body.password)
+    try:
+        user = await authenticate(session, body.numero_fiscal, body.password)
+    except AccountLocked:
+        raise HTTPException(423, "account_locked")
 
     if user is None:
+        await session.commit()  # keep the failure count (lockout)
         raise HTTPException(401, "invalid_credentials")
 
     sso = await sessions.create(session, user, request)
