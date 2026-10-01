@@ -36,10 +36,19 @@ async def s():
         await conn.rollback()
 
 @pytest.fixture
-async def client(s):
-    app = create_app()
-    app.dependency_overrides[get_session] = lambda: s  # the routes share the test's transaction
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://auth.authentint.local") as c:
+def make_client(s):
+    """A client seen by the server as coming from `ip` (one per simulated browser)."""
+
+    def build(ip: str = "127.0.0.1") -> AsyncClient:
+        app = create_app()
+        app.dependency_overrides[get_session] = lambda: s  # the routes share the test's transaction
+        return AsyncClient(transport=ASGITransport(app=app, client=(ip, 51000)), base_url="https://auth.authentint.local")
+
+    return build
+
+@pytest.fixture
+async def client(make_client):
+    async with make_client() as c:
         yield c
 
 @pytest.fixture

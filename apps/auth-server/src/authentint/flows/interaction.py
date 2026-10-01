@@ -37,9 +37,13 @@ from authentint.infra.database import get_session
 from authentint.sessions import queries as sessions
 from authentint.infra.models.oauth import OAuthClients
 from authentint.infra.models.oauth import OAuthInteractions
+from authentint.security import ratelimit
 
 
 TTL = timedelta(minutes=10)
+
+LOGIN_LIMIT = 10                      # login attempts per IP...
+LOGIN_WINDOW = timedelta(minutes=1)   # ...per minute: a family behind one box is fine, a script is not
 
 Prompt = Literal["login", "consent"]  # the MFA seam (ADR §2) will add "otp"
 
@@ -117,6 +121,12 @@ async def get_interaction(uid: str, session: AsyncSession = Depends(get_session)
 async def login(uid: str, body: LoginBody, request: Request, response: Response,
                 session: AsyncSession = Depends(get_session)):
     """On success, sets the `__Host-session` cookie and answers the next step."""
+
+    # First, before any Argon2 work: one source cannot try more than LOGIN_LIMIT times per LOGIN_WINDOW
+    ip = request.client.host if request.client else "unknown"
+    if not await ratelimit.hit(session, f"login:ip:{ip}", LOGIN_LIMIT, LOGIN_WINDOW):
+        raise HTTPException(429, "too_many_attempts")
+    await session.commit()  # the counter must survive whatever happens next (401, 423, 404...)
 
     it = await load(session, uid)
     try:
