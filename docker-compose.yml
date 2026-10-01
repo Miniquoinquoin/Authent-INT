@@ -68,7 +68,14 @@ services:
   auth-server:
     build: ./apps/auth-server
     restart: unless-stopped
-    environment: *auth-env
+    environment:
+      <<: *auth-env
+      # uvicorn only believes X-Forwarded-For from trusted proxies (default: 127.0.0.1).
+      # Without this, request.client.host is Caddy's IP for EVERY user, and the
+      # per-IP rate limit would put all of France in one bucket. "*" is acceptable
+      # because no port is published: only containers on `edge` reach auth-server.
+      # Kubernetes: replace by the Ingress controller's pod CIDR (§12).
+      FORWARDED_ALLOW_IPS: "*"
     networks: [edge, data] # le seul service sur les deux réseaux
     depends_on:
       migrate:
