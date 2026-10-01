@@ -1,8 +1,10 @@
 import secrets
+import time
 
 from pydantic import BaseModel
 from pydantic import Field
 from typing import Literal
+from typing import Annotated
 from urllib.parse import unquote
 from joserfc.jwk import RSAKey
 from joserfc import jwt
@@ -11,20 +13,29 @@ from fastapi.security import HTTPBasicCredentials
 from datetime import datetime
 from datetime import timezone
 from datetime import timedelta
+from fastapi import Depends
+from fastapi import Form
+from fastapi.security import HTTPBasic
+from fastapi.responses import JSONResponse
 
+from . import router
 from authentint.config import settings
+from authentint.infra.database import get_session
 from authentint.infra.models.oauth import OAuthClients
 from authentint.infra.models.oauth import OAuthAuthorizationCodes
 from authentint.infra.models.oauth import ClientType
 from authentint.infra.models.identity import User
+from authentint.infra.models.identity import UserStatus
+from authentint.infra.models.oauth import OAuthRefreshTokens
 from authentint.domain.errors import OAuthError
 from authentint.domain.claims import IdToken
 from authentint.domain.claims import AccessToken
-from authentint.infra.models.oauth import OAuthRefreshTokens
+from authentint.domain.scopes import audiences
 from authentint.clients import queries as clients
 from authentint.security.passwords import verify_password
-from authentint.domain.scopes import audiences
 from authentint.security.passwords import hash_token
+from authentint.oidc.codes import consume_code
+from authentint.keys import keystore
 
 
 class TokenBody(BaseModel):
@@ -123,3 +134,33 @@ async def issue_refresh(session: AsyncSession, row: OAuthAuthorizationCodes) -> 
     await session.commit()
 
     return raw_token
+
+@router.post("/token")
+async def exchange_code(body: Annotated[TokenBody, Form()], credentials: HTTPBasicCredentials | None = Depends(HTTPBasic(auto_error=False)), session: AsyncSession = Depends(get_session)):
+    client = await authenticate_client(session, body.client_id, credentials)
+
+    oauth_auth_code: OAuthAuthorizationCodes = await consume_code(session, body.code, client.id, body.redirect_uri, body.code_verifier)
+
+    user: User = await session.get(User, oauth_auth_code.user_id)
+
+    if user is None or user.status != UserStatus.active:
+        raise OAuthError("invalid_grant")
+
+    key = await keystore.active(session)
+    now = int(time.time()) # using linux time representation (seconds ellapsed from...)
+    access_token: str = sign(access_claims(oauth_auth_code, now), key, typ="at+jwt")
+    id_token: str = sign(id_claims(oauth_auth_code, user, now), key)
+
+    body: dict = {
+        "access_token": access_token,
+        "id_token": id_token,
+        "token_type": "Bearer",
+        "expires_in": settings.access_token_ttl,
+        "scope": oauth_auth_code.scope
+    }
+
+    if "offline_access" in oauth_auth_code.scope.split():
+        refresh_token: str = await issue_refresh(session, oauth_auth_code)
+        body["refresh_token"] = refresh_token
+
+    return JSONResponse(body, headers={"Cache-Control": "no-store"})
