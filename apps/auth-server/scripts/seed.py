@@ -13,7 +13,10 @@ Idempotent: every row is an upsert, so running it twice changes nothing. It
 never deletes anything. Dev only: outside DEV=true, settings.fixtures_path is
 None and the script refuses to run.
 
-    docker compose exec auth-server uv run --no-sync python -m scripts.seed
+    docker compose exec auth-server uv run --no-sync python -m scripts.seed [N]
+
+N (default SEED_USERS): how many fixture users to seed. The k6 login scenario wants ~400
+(`make seed N=400`, docs/load-report.md): the per-account rate limit caps each one at 10 logins/min.
 """
 
 import asyncio
@@ -48,7 +51,8 @@ async def main():
         sys.exit("seed is dev only (DEV=true)")
 
     password_hash = await hash_password(DEV_PASSWORD)
-    users = list(itertools.islice(JsonDirectory(settings.fixtures_path).list_all(), SEED_USERS))
+    count = int(sys.argv[1]) if len(sys.argv) > 1 else SEED_USERS
+    users = list(itertools.islice(JsonDirectory(settings.fixtures_path).list_all(), count))
 
     async with Session() as s:
         for du in users:
