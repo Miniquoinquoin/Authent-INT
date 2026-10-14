@@ -37,7 +37,8 @@ async def token_validation_handler(request, exc) -> JSONResponse:
 
     code = "invalid_request"
 
-    if any(["grant_type" in e["loc"] for e in exc.errors()]):
+    # A MISSING grant_type is a missing parameter (invalid_request); only an unknown value is unsupported
+    if any("grant_type" in e["loc"] and e["type"] != "missing" for e in exc.errors()):
         code = "unsupported_grant_type"
 
     return JSONResponse({"error": code}, headers={"Cache-Control": "no-store"}, status_code=400)

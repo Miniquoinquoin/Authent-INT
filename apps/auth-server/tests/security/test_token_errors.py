@@ -5,8 +5,6 @@ import pytest
 from conftest import VERIFIER
 
 
-@pytest.mark.xfail(strict=True, reason="token_validation_handler maps a MISSING grant_type to unsupported_grant_type; "
-                                       "RFC 6749 §5.2 wants invalid_request (only an unknown value is unsupported)")
 async def test_an_empty_form_is_an_invalid_request(client):
     r = await client.post("/token", data={})
     assert r.status_code == 400
