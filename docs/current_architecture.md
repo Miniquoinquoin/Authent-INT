@@ -216,7 +216,7 @@ annulée par test.
 | Sujet | Question |
 | --- | --- |
 | `keys/routes.py` | `/admin/keys/rotate` est protégé par `svc:admin.users` : faut-il un scope `svc:admin.keys` ? |
-| `numero_fiscal` | « Chiffré au repos » (ADR §8), mais il faut le retrouver au login : chiffrement déterministe ou index aveugle (HMAC) ? Décision B1. |
+| **`audit_events` n'est PAS append-only** ⚠️ | `authentint_app` est le `POSTGRES_USER` de l'image : **superutilisateur**, donc le `REVOKE UPDATE, DELETE` de la migration ne s'applique pas (vérifié : un `DELETE` passe). Invariant 10 non tenu. Correctif : un rôle propriétaire pour `migrate`, un rôle applicatif sans `UPDATE`/`DELETE` sur l'audit pour `auth-server`. C'est le « fini quand » de **B4**. |
 
 **Tranché :** `svc:cadastre.write` n'est accordé à **aucun** rôle, conformément
 à [architecture.md §9](architecture.md#9-rôles-et-scopes). Un admin gère des
@@ -224,6 +224,13 @@ comptes, pas des parcelles (moindre privilège). Qui modifie le cadastre est
 posé au client ([ADR §18](adr/0002-stack-simplifiee.md#18-questions-pour-le-client), q.12) ;
 le test `test_nobody_edits_the_cadastre_until_the_client_decides` change avec
 la réponse.
+
+**Tranché (B1) :** le numéro fiscal n'est **jamais stocké**, seulement
+`HMAC-SHA256(NUMERO_FISCAL_KEY, numéro)` dans `users.numero_fiscal_hmac`
+(pseudonymisation, `security/identifiers.py`). Le login calcule le HMAC de ce
+qui est saisi. Un SHA-256 sans clé ne suffirait pas : 10¹³ numéros se hachent
+tous en quelques heures. Rien n'a besoin de relire un numéro ; l'annuaire reste
+la source. À confirmer avec le client ([ADR §18](adr/0002-stack-simplifiee.md#18-questions-pour-le-client), q.5).
 
 ---
 
@@ -239,11 +246,12 @@ la réponse.
 | `keys/` keystore · routes | fait |
 | `oidc/` discovery · jwks | fait, testé |
 | `oidc/authorize.py` | vérifications 1-7 faites et testées ; chemin SSO → `issue_code` (stub, B2) |
-| `flows/interaction.py` | `create` · `load` · `next_step` · `GET` faits ; `login` · `consent` → 501 (B1) |
+| `flows/interaction.py` | fait (B1) : `login` (temps constant, verrouillage, rate limit, cookie `__Host-`, audit) · `consent` (mémorisé par utilisateur et client) |
 | `ops/` | `/health/live`, `/health/ready` ; `/metrics` manquant (B6) |
 | `oidc/` codes · token · userinfo · revoke · end_session | B2 |
-| `flows/` activation · reset | B1 |
-| `users/` · `clients/` · `sessions/` queries + routes `/me` `/admin` | B1 · B4 |
+| `flows/` activation · reset | fait (B1) : lien aléatoire stocké haché, usage unique, réponse identique ; le reset ferme toutes les sessions |
+| `users/` · `sessions/` queries | fait (B1) : `by_numero_fiscal` (par HMAC), `sessions.create` |
+| routes `/me` · `/admin` | B4 |
 | `apps/mock-services/` | stub qui répond 200 à tout (B3) |
 | frontend | écran de login de démonstration (B5) |
 
