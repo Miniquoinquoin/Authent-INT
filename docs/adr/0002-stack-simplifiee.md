@@ -729,6 +729,12 @@ client dit quel relais utiliser.
 | GET | `/me/audit` — son propre historique de connexion |
 | POST | `/me/password` |
 
+> **Audience.** Un access token porte dans `aud` un Resource Server par scope
+> `svc:*`, plus `authentint` (l'IdP lui-même) dès que `openid` est accordé.
+> `/userinfo` et `/me*` exigent `authentint` dans `aud` : un jeton émis pour
+> `svc-impots` seul n'ouvre pas les API de l'IdP. Les routes admin ci-dessous
+> sont protégées par les scopes `svc:admin.*`, pas par l'audience.
+
 ### Admin (`svc:admin.*`)
 
 | Méthode | Chemin |

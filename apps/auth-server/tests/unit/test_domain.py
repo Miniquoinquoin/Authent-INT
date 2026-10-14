@@ -38,8 +38,11 @@ def test_nobody_edits_the_cadastre_until_the_client_decides():
     # ADR §18 q.12: change this test together with ALLOWED once the client answers
     assert not any("svc:cadastre.write" in scopes for scopes in ALLOWED.values())
 
-def test_one_audience_per_service():
-    assert audiences({"openid", "svc:impots.read", "svc:impots.write", "svc:cadastre.read"}) == ["svc-cadastre", "svc-impots"]
+def test_one_audience_per_service_plus_the_idp_for_openid():
+    assert audiences({"openid", "svc:impots.read", "svc:impots.write", "svc:cadastre.read"}) == ["authentint", "svc-cadastre", "svc-impots"]
+
+def test_without_openid_the_idp_is_not_an_audience():
+    assert audiences({"svc:impots.read"}) == ["svc-impots"]
 
 
 def test_an_id_token_cannot_be_built_without_nonce():

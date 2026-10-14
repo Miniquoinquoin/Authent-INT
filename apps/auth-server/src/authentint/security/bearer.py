@@ -15,7 +15,12 @@ from authentint.infra.database import get_session
 bearer = HTTPBearer()
 
 
-async def verify_access_token(session: AsyncSession, token: str) -> dict:
+async def verify_access_token(session: AsyncSession, token: str, audience: str | None = None) -> dict:
+    """
+    Signature (RS256 pinned), typ, iss, exp; and `aud` must contain `audience` when given (ADR §11):
+    a token minted for svc-impots alone must not open /userinfo.
+    """
+
     try:
         tok = jwt.decode(token, KeySet.import_key_set(await keystore.jwks(session)), algorithms=["RS256"])
         if tok.header.get("typ") != "at+jwt":
@@ -26,6 +31,11 @@ async def verify_access_token(session: AsyncSession, token: str) -> dict:
         ).validate(tok.claims)
     except JoseError:
         raise HTTPException(401, "invalid_token")
+
+    aud = tok.claims.get("aud")
+    if audience is not None and audience not in (aud if isinstance(aud, list) else [aud]):
+        raise HTTPException(401, "invalid_token")
+
     return tok.claims
 
 def require_scope(scope: str):
@@ -35,9 +45,17 @@ def require_scope(scope: str):
     async def dep(cred: HTTPAuthorizationCredentials = Depends(bearer), session=Depends(get_session)) -> dict:
         claims = await verify_access_token(session, cred.credentials)
 
-        if scope not in claims["scope"].split():
+        if scope not in claims.get("scope", "").split():
             raise HTTPException(403, "insufficient_scope")
 
         return claims
+
+    return dep
+
+def require_audience(audience: str):
+    """Route protection for the auth-server's own APIs (/me...): the token must name `audience`."""
+
+    async def dep(cred: HTTPAuthorizationCredentials = Depends(bearer), session=Depends(get_session)) -> dict:
+        return await verify_access_token(session, cred.credentials, audience)
 
     return dep

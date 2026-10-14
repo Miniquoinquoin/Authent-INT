@@ -5,6 +5,9 @@ from authentint.infra.models.oauth import OAuthClients
 # Standard OIDC scopes: they describe the identity itself, so every role may receive them (ADR §7)
 OIDC_SCOPES: frozenset[str] = frozenset({"openid", "profile", "email", "offline_access"})
 
+# The auth-server's own audience: /userinfo and /me accept only a token that names it (ADR §9)
+IDP_AUDIENCE = "authentint"
+
 # Defines allowed service scopes for each role (architecture.md §9).
 # svc:cadastre.write exists but is granted to nobody: editing the land registry is a business right,
 # not an IT one, so admin doesn't get it. Who does is a question for the client (ADR §18, q.12).
@@ -24,8 +27,11 @@ def grant(requested: set[str], role: Role, client: OAuthClients) -> set[str]:
 
 def audiences(scopes: set[str]) -> list[str]:
     """
-    The access token `aud`: one Resource Server per service scope, "svc:impots.read" -> "svc-impots".
+    The access token `aud`: one Resource Server per service scope, "svc:impots.read" -> "svc-impots",
+    plus IDP_AUDIENCE when `openid` is granted, since the token then also opens /userinfo.
     Each Resource Server rejects a token whose `aud` does not contain its own name (ADR §11).
     """
 
-    return sorted({"svc-" + s.removeprefix("svc:").split(".")[0] for s in scopes if s.startswith("svc:")})
+    services = {"svc-" + s.removeprefix("svc:").split(".")[0] for s in scopes if s.startswith("svc:")}
+
+    return sorted(services | {IDP_AUDIENCE} if "openid" in scopes else services)

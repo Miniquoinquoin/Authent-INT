@@ -40,7 +40,7 @@ async def test_a_code_becomes_signed_tokens(client, s, authorize_params, make_us
     access = await verify_access_token(s, body["access_token"])  # exactly what the Resource Servers will check
     assert access["sub"] == str(user.id)
     assert access["scope"] == "openid svc:impots.read"
-    assert access["aud"] == ["svc-impots"]
+    assert access["aud"] == ["authentint", "svc-impots"]
 
     keys = KeySet.import_key_set(await keystore.jwks(s))
     id_token = jwt.decode(body["id_token"], keys, algorithms=["RS256"]).claims
