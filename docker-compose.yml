@@ -11,7 +11,8 @@ x-auth-env: &auth-env
   PUBLIC_BASE_URL: https://app.authentint.localhost
   KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:?KEY_ENCRYPTION_KEY vide dans .env, voir .env.example}
   NUMERO_FISCAL_KEY: ${NUMERO_FISCAL_KEY:?NUMERO_FISCAL_KEY vide dans .env, voir .env.example}
-  DATABASE_URL: postgresql+asyncpg://authentint_app:${POSTGRES_PASSWORD:-authentint}@postgres:5432/authentint
+  # The runtime role: plain DML, audit_events append-only (migration 3c1e7a2b9d04, ADR §8)
+  DATABASE_URL: postgresql+asyncpg://authentint_app:${APP_DB_PASSWORD:-authentint-app}@postgres:5432/authentint
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
 networks:
@@ -60,7 +61,11 @@ services:
   migrate:
     build: ./apps/auth-server
     command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
-    environment: *auth-env
+    environment:
+      <<: *auth-env
+      # The owner migrates (DDL, grants); it also creates authentint_app with this password
+      DATABASE_URL: postgresql+asyncpg://authentint_owner:${POSTGRES_PASSWORD:-authentint}@postgres:5432/authentint
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-authentint-app}
     networks: [data]
     depends_on:
       postgres:
@@ -132,14 +137,16 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: authentint_app
+      # Owner of the schema, superuser of the container: used by `migrate` only.
+      # Changed from authentint_app: an existing volume needs `docker compose down -v` once.
+      POSTGRES_USER: authentint_owner
       POSTGRES_DB: authentint
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-authentint}
     volumes:
       - pg_data:/var/lib/postgresql/data
     networks: [data] # invisible depuis l'hôte et depuis les mocks
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U authentint_app -d authentint"]
+      test: ["CMD-SHELL", "pg_isready -U authentint_owner -d authentint"]
       interval: 5s
       timeout: 3s
       retries: 10

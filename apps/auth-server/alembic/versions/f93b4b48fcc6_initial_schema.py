@@ -159,9 +159,7 @@ def upgrade() -> None:
     # A partitioned table with zero partitions rejects every insert — one default
     # partition catches everything until real per-period partitions are added later.
     op.execute("CREATE TABLE audit_events_default PARTITION OF audit_events DEFAULT")
-    # ADR §8: append-only at the privilege level, not just by convention — even a
-    # bug or SQL injection in auth-server can't erase or alter an audit trail.
-    op.execute("REVOKE UPDATE, DELETE ON audit_events FROM authentint_app")
+    # ADR §8 append-only: enforced by 3c1e7a2b9d04_app_role (the runtime role doesn't exist yet here)
     op.create_table('authorization_codes',
     sa.Column('code_hash', sa.String(), nullable=False),
     sa.Column('client_id', sa.String(), nullable=False),

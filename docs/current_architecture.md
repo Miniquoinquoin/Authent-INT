@@ -66,7 +66,7 @@ scripts/seed.py (vide)                  scripts/seed.py      utilisateurs + clie
 | — | `domain/` | Les règles (scopes accordés par rôle, forme de l'ID token, trois façons de répondre une erreur OAuth) sont testables en une milliseconde, sans base ni réseau. |
 | — | `security/ratelimit.py` | Compteur atomique dans Postgres (`INSERT … ON CONFLICT … RETURNING`), partagé par tous les réplicas. **Échoue fermé** : si la base ne répond pas, on refuse. |
 | — | `external/` | Un `Protocol` par système extérieur (`UserDirectory`, `Mailer`). Le JSON deviendra un LDAP, la console un SMTP, sans toucher au code métier. |
-| — | `audit/` | `emit()` refuse tout `detail` contenant un secret ; le middleware pose un `request_id` pour corréler une requête à travers les logs. La table est append-only au niveau SQL (migration). |
+| — | `audit/` | `emit()` refuse tout `detail` contenant un secret ; le middleware pose un `request_id` pour corréler une requête à travers les logs. La table est append-only au niveau des privilèges : `auth-server` se connecte en `authentint_app` (ni superutilisateur ni propriétaire, `SELECT`/`INSERT` seulement sur `audit_events`) ; `migrate` en `authentint_owner` (migration `3c1e7a2b9d04`, `tests/security/test_audit_append_only.py`). Un volume créé avant ce changement : `docker compose down -v` une fois. |
 | `infra/` = connexion + modèles | inchangé, et **seulement** ça | Règle du learning plan : dès qu'un fichier *fait* quelque chose avec la base (requête, verrou, compteur), il appartient à la fonctionnalité qui en a besoin. |
 
 Dépendances : `bcrypt` → `argon2-cffi`, `python-jose` → `joserfc`, ajout de
@@ -216,7 +216,6 @@ annulée par test.
 | Sujet | Question |
 | --- | --- |
 | `keys/routes.py` | `/admin/keys/rotate` est protégé par `svc:admin.users` : faut-il un scope `svc:admin.keys` ? |
-| **`audit_events` n'est PAS append-only** ⚠️ | `authentint_app` est le `POSTGRES_USER` de l'image : **superutilisateur**, donc le `REVOKE UPDATE, DELETE` de la migration ne s'applique pas (vérifié : un `DELETE` passe). Invariant 10 non tenu. Correctif : un rôle propriétaire pour `migrate`, un rôle applicatif sans `UPDATE`/`DELETE` sur l'audit pour `auth-server`. C'est le « fini quand » de **B4**. |
 
 **Tranché :** `svc:cadastre.write` n'est accordé à **aucun** rôle, conformément
 à [architecture.md §9](architecture.md#9-rôles-et-scopes). Un admin gère des

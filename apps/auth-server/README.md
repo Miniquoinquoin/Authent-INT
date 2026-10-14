@@ -42,6 +42,13 @@ make openapi           # after touching a route: regenerate docs/generated/opena
 Migrations run in the `migrate` service before `auth-server` starts, so a new
 file in `alembic/versions/` is applied by the next `make up`.
 
+Two database roles (ADR §8): `migrate` connects as `authentint_owner`
+(`POSTGRES_USER`, owns the schema), `auth-server` and the tests as
+`authentint_app` (`APP_DB_PASSWORD`), created by a migration with plain DML
+rights and only `SELECT`/`INSERT` on `audit_events`. A volume created before
+this split (when `authentint_app` was the superuser) must be reset once:
+`docker compose down -v && make up && make seed`.
+
 `KEY_ENCRYPTION_KEY` encrypts the signing keys stored in Postgres. Changing it
 leaves the existing keys undecryptable: reset the database
 (`docker compose down -v`) rather than rotating it in dev.

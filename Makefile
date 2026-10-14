@@ -24,4 +24,4 @@ openapi:  ## regenerate the interaction-API contract (docs/generated/openapi.jso
 	$(EXEC) python -m scripts.export_openapi > docs/generated/openapi.json
 
 psql:
-	docker compose exec postgres psql -U authentint_app authentint
+	docker compose exec postgres psql -U authentint_owner authentint
