@@ -14,11 +14,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: .env from the example, with a throwaway encryption key
+      - name: .env from the example, with throwaway keys
         run: |
           cp .env.example .env
           key=$(python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
           sed -i "s|^KEY_ENCRYPTION_KEY=.*|KEY_ENCRYPTION_KEY=$key|" .env
+          nf_key=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+          sed -i "s|^NUMERO_FISCAL_KEY=.*|NUMERO_FISCAL_KEY=$nf_key|" .env
 
       - name: Build, migrate, start (waits for every healthcheck)
         run: make up

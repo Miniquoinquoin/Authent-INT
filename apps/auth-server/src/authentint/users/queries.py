@@ -2,6 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from authentint.infra.models.identity import User
+from authentint.security.identifiers import numero_fiscal_digest
 
 
 async def by_numero_fiscal(session: AsyncSession, numero_fiscal: str) -> User | None:
@@ -10,4 +11,4 @@ async def by_numero_fiscal(session: AsyncSession, numero_fiscal: str) -> User | 
     the caller must then answer exactly as for a wrong password.
     """
 
-    return await session.scalar(select(User).where(User.numero_fiscal==numero_fiscal))
+    return await session.scalar(select(User).where(User.numero_fiscal_hmac == numero_fiscal_digest(numero_fiscal)))

@@ -21,6 +21,7 @@ from authentint.infra.models.identity import UserStatus
 from authentint.infra.models.oauth import ClientType
 from authentint.infra.models.oauth import OAuthClients
 from authentint.main import create_app
+from authentint.security.identifiers import numero_fiscal_digest
 from authentint.security.passwords import hash_password
 
 
@@ -84,22 +85,24 @@ def alice_password() -> str:
 async def alice(s) -> User:
     """An active contribuable whose password is ALICE_PASSWORD."""
 
-    u = User(external_id="test-alice", numero_fiscal="1801234567890", email="alice@example.test",
+    u = User(external_id="test-alice", numero_fiscal_hmac=numero_fiscal_digest("1801234567890"), email="alice@example.test",
              nom="Martin", prenom="Alice", password_hash=await hash_password(ALICE_PASSWORD),
              role=Role.contribuable, status=UserStatus.active)
     s.add(u)
     await s.flush()
+    u.numero_fiscal = "1801234567890"  # what alice TYPES; a plain Python attribute, never stored
     return u
 
 @pytest.fixture
 async def bob(s) -> User:
     """A contribuable imported from the directory, never activated: no password yet."""
 
-    u = User(external_id="test-bob", numero_fiscal="1807654321098", email="bob@example.test",
+    u = User(external_id="test-bob", numero_fiscal_hmac=numero_fiscal_digest("1807654321098"), email="bob@example.test",
              nom="Durand", prenom="Bob", password_hash=None,
              role=Role.contribuable, status=UserStatus.pending_activation)
     s.add(u)
     await s.flush()
+    u.numero_fiscal = "1807654321098"  # what bob TYPES; never stored
     return u
 
 @pytest.fixture

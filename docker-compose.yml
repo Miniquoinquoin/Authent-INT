@@ -10,6 +10,7 @@ x-auth-env: &auth-env
   ISSUER: https://auth.authentint.local
   PUBLIC_BASE_URL: https://app.authentint.local
   KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:?KEY_ENCRYPTION_KEY vide dans .env, voir .env.example}
+  NUMERO_FISCAL_KEY: ${NUMERO_FISCAL_KEY:?NUMERO_FISCAL_KEY vide dans .env, voir .env.example}
   DATABASE_URL: postgresql+asyncpg://authentint_app:${POSTGRES_PASSWORD:-authentint}@postgres:5432/authentint
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
