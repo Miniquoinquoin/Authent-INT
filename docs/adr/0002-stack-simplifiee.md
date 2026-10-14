@@ -526,7 +526,7 @@ est l'intention.
 users
   id                uuid pk
   external_id       text unique null   -- clé de jointure annuaire
-  numero_fiscal     text unique        -- identifiant de login, chiffré au repos
+  numero_fiscal_hmac text unique       -- HMAC-SHA256 de l'identifiant de login ; le numéro n'est jamais stocké
   email             text               -- unique sur lower(email)
   nom, prenom       text
   password_hash     text null          -- null jusqu'à l'activation. LE NÔTRE.
@@ -633,6 +633,10 @@ transforme la *traçabilité* d'une affirmation en garantie.
 ```sql
 REVOKE UPDATE, DELETE ON audit_events FROM authentint_app;
 ```
+
+Ça ne vaut que si `authentint_app` n'est ni superutilisateur ni propriétaire : le
+propriétaire (`authentint_owner`) ne sert qu'à `migrate`, `auth-server` se connecte
+en `authentint_app` (migration `3c1e7a2b9d04`).
 
 ### Gestion des clés
 

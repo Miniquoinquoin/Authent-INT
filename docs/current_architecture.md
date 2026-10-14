@@ -64,7 +64,7 @@ scripts/seed.py (vide)                  scripts/seed.py      utilisateurs + clie
 | `get_user_by_username` dans `main.py` | `users/`, `clients/`, `sessions/` → `queries.py` | Chaque fonctionnalité possède ses requêtes. Une autre fonctionnalité peut importer ce `queries.py`, jamais ses routes. |
 | CORS `allow_origins=[PUBLIC_BASE_URL]` | **perdu** dans la réécriture de `main.py`, à remettre | Le frontend (`app.`) appelle `/token` sur `auth.` : c'est une autre origine, donc sans CORS le navigateur bloque la réponse. Liste blanche, jamais `*` (ADR §16). |
 | — | `domain/` | Les règles (scopes accordés par rôle, forme de l'ID token, trois façons de répondre une erreur OAuth) sont testables en une milliseconde, sans base ni réseau. |
-| — | `security/ratelimit.py` | Compteur atomique dans Postgres (`INSERT … ON CONFLICT … RETURNING`), partagé par tous les réplicas. **Échoue fermé** : si la base ne répond pas, on refuse. |
+| — | `security/ratelimit.py` | Compteur atomique dans Postgres (`INSERT … ON CONFLICT … RETURNING`), partagé par tous les réplicas. **Échoue fermé** : si la base ne répond pas, on refuse. Seaux : login par IP (10/min) **et** par compte (10/min, clé = HMAC du numéro fiscal, partagé avec `/me/password`), `/token` par IP (30/min → `429` + `Retry-After`, RFC 6585 §4 : RFC 6749 §5.2 n'a pas de code pour ça). Les seaux expirés sont purgés paresseusement (1 appel sur 100, ADR §8). |
 | — | `external/` | Un `Protocol` par système extérieur (`UserDirectory`, `Mailer`). Le JSON deviendra un LDAP, la console un SMTP, sans toucher au code métier. |
 | — | `audit/` | `emit()` refuse tout `detail` contenant un secret ; le middleware pose un `request_id` pour corréler une requête à travers les logs. La table est append-only au niveau des privilèges : `auth-server` se connecte en `authentint_app` (ni superutilisateur ni propriétaire, `SELECT`/`INSERT` seulement sur `audit_events`) ; `migrate` en `authentint_owner` (migration `3c1e7a2b9d04`, `tests/security/test_audit_append_only.py`). Un volume créé avant ce changement : `docker compose down -v` une fois. |
 | `infra/` = connexion + modèles | inchangé, et **seulement** ça | Règle du learning plan : dès qu'un fichier *fait* quelque chose avec la base (requête, verrou, compteur), il appartient à la fonctionnalité qui en a besoin. |
@@ -250,7 +250,7 @@ la source. À confirmer avec le client ([ADR §18](adr/0002-stack-simplifiee.md#
 | `oidc/` codes · token · userinfo · revoke · end_session | B2 |
 | `flows/` activation · reset | fait (B1) : lien aléatoire stocké haché, usage unique, réponse identique ; le reset ferme toutes les sessions |
 | `users/` · `sessions/` queries | fait (B1) : `by_numero_fiscal` (par HMAC), `sessions.create` |
-| routes `/me` · `/admin` | B4 |
+| routes `/me` · `/admin` | fait (B4) : `GET /me`, `POST /me/password`, `GET|DELETE /me/sessions`, `GET /me/audit` (audience `authentint`) ; `/admin/users` (+ `lock`, `unlock`, `resend-activation`), `/admin/clients`, `/admin/sessions` (`svc:admin.users`) ; `/admin/audit` + export CSV plafonné à 10 000 lignes (`svc:admin.audit`). Audit append-only au niveau des privilèges (rôle `authentint_app`) ; `audit.emit` remplit `client_id` et `session_id`. |
 | `apps/mock-services/` | stub qui répond 200 à tout (B3) |
 | frontend | écran de login de démonstration (B5) |
 
