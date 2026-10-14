@@ -6,6 +6,8 @@ JWTs themselves are signed in oidc/token.py with active().
 
 import secrets
 
+from functools import lru_cache
+
 from cryptography.fernet import Fernet
 from joserfc.jwk import RSAKey
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,8 +70,20 @@ async def jwks(session: AsyncSession) -> dict:
 
     return {"keys": [row.public_jwk for row in rows]}
 
+@lru_cache(maxsize=8)
+def _private_key(kid: str, private_pem_encrypted: str) -> RSAKey:
+    """
+    Decrypt + PEM import once per key, not once per token: cryptography validates the RSA key on
+    import (on the event loop), which kept one replica from serving 30 /token per second
+    (docs/load-report.md). A kid never changes its key material, so the cache cannot go stale;
+    a rotation only adds a new kid.
+    """
+
+    pem = fernet.decrypt(private_pem_encrypted.encode())
+
+    return RSAKey.import_key(pem, parameters={"kid": kid})
+
 async def active(session: AsyncSession) -> RSAKey:
     row = await session.scalar(select(SigningKeys).where(SigningKeys.status == KeyStatus.active))
-    pem = fernet.decrypt(row.private_pem_encrypted.encode())
 
-    return RSAKey.import_key(pem, parameters={"kid": row.kid})
+    return _private_key(row.kid, row.private_pem_encrypted)

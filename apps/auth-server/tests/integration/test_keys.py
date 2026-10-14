@@ -1,5 +1,7 @@
 """POST /admin/keys/rotate (ADR §12): next → active → retired, and the rotation is audited in the same transaction."""
 
+from joserfc import jws
+from joserfc.jwk import RSAKey
 from sqlalchemy import func
 from sqlalchemy import select
 
@@ -43,3 +45,18 @@ async def test_rotation_needs_the_admin_scope(client, s, make_user, access_token
 async def test_rotation_needs_a_token(client):
     r = await client.post("/admin/keys/rotate")
     assert r.status_code in (401, 403)  # HTTPBearer: no credentials at all
+
+async def test_active_key_signs_and_follows_a_rotation(s):
+    # keystore._private_key is cached per kid (perf, docs/load-report.md): the cache must never
+    # hand out the previous key after a rotation, and what it returns must really sign
+    await keystore.ensure_active_key(s)
+    key = await keystore.active(s)
+    public = RSAKey.import_key(await s.scalar(select(SigningKeys.public_jwk).where(SigningKeys.kid == key.kid)))
+    token = jws.serialize_compact({"alg": "RS256", "kid": key.kid}, b"payload", key)
+    assert jws.deserialize_compact(token, public).payload == b"payload"
+    assert await keystore.active(s) is key  # second call: cache hit, no decrypt + import
+
+    next_kid = await kid(s, KeyStatus.next)
+    await keystore.rotate(s)
+
+    assert (await keystore.active(s)).kid == next_kid
