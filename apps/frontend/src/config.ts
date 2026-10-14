@@ -26,7 +26,7 @@ export const CLIENT_ID = 'portail-web'
 /**
  * Must be byte-for-byte one of the client's registered `redirect_uris` (ADR §10 step 2).
  * Default: this origin + /callback, which is right for every environment where the
- * SPA is served on the registered host (app.authentint.local, or .localhost after B2).
+ * SPA is served on the registered host (https://app.authentint.localhost in dev).
  */
 export const REDIRECT_URI = absolute(
   (import.meta.env.VITE_OIDC_REDIRECT_URI as string | undefined) ?? '/callback',

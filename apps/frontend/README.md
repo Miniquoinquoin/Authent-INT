@@ -33,7 +33,7 @@ Liens d'e-mail en mock : `/activate?token=lien-de-test-valide`,
 
 Contre le vrai auth-server, le SPA doit être servi sur l'origine enregistrée
 (`PUBLIC_BASE_URL`, `redirect_uris` du client `portail-web`, CORS) : c'est le
-conteneur `frontend` derrière Caddy (`https://app.authentint.local`), pas
+conteneur `frontend` derrière Caddy (`https://app.authentint.localhost`), pas
 `npm run dev` sur `localhost`.
 
 ## Écrans et routes
@@ -163,7 +163,7 @@ fait tout cela, et échoue si `src/api/types.ts` n'est pas à jour avec
 
 En local : copier `.env.example` en `.env.local` (ignoré par git). Dans l'image :
 `docker build --build-arg VITE_AUTH_URL=… apps/frontend` (défaut
-`https://auth.authentint.local`) ; la même valeur alimente le `connect-src` de
+`https://auth.authentint.localhost`) ; la même valeur alimente le `connect-src` de
 la CSP.
 
 ## Seams
@@ -171,15 +171,15 @@ la CSP.
 - **S3 — API d'interaction** : déjà réelle (B1 mergé). Les écrans de login,
   consentement, activation et reset parlent au vrai serveur dès que le SPA est
   servi sur `app.authentint.*` ; le mock reste pour les tests.
-- **S2/S3 — B2** (`/authorize` SSO, `/token`, `/end-session`) : à la fusion de
-  B2, seuls [src/auth/oidc.ts](src/auth/oidc.ts) et
-  [src/auth/claims.ts](src/auth/claims.ts) peuvent changer. Points à vérifier :
-  forme de la réponse `/token` (alignée sur `feat/b2-oidc`), `/end-session`
-  (appelé en GET avec `client_id` + `post_logout_redirect_uri`, **sans**
-  `id_token_hint` pour ne pas mettre un JWT nominatif dans une URL — à confirmer
-  avec B2), les noms d'hôte `*.authentint.localhost` de B2 (le `redirect_uri`
-  suit l'origine ; seul le défaut `VITE_AUTH_URL` du Dockerfile change), puis
-  faire tourner le parcours Playwright contre la vraie stack.
+- **S2/S3 — B2** (`/authorize` SSO, `/token`, `/end-session`) : tout ce qui
+  dépend de B2 est dans [src/auth/oidc.ts](src/auth/oidc.ts) et
+  [src/auth/claims.ts](src/auth/claims.ts). `/authorize` et `/token` sont réels
+  sur `main` (la requête `/token` est typée par `TokenBody` du contrat ; sa
+  réponse, non déclarée dans l'OpenAPI, par `claims.ts`, alignée sur
+  `oidc/token.py`). **`/end-session` n'existe pas encore** : le SPA l'appelle en
+  GET avec `client_id` + `post_logout_redirect_uri`, **sans** `id_token_hint`
+  pour ne pas mettre un JWT nominatif dans une URL — à confirmer avec B2. Reste
+  à faire tourner le parcours Playwright contre la vraie stack.
 - **S4 — B4** : les écrans « mon compte » (sessions, historique) et admin
   arrivent avec les routes `/me/*` et `/admin/*`, d'abord contre un mock MSW
   généré du même `openapi.json`.

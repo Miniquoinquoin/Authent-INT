@@ -48,7 +48,7 @@ jobs:
         run: npm run build
         env:
           # Without it the bundle is only the "VITE_AUTH_URL n'est pas défini" error (dead-code eliminated)
-          VITE_AUTH_URL: https://auth.authentint.local
+          VITE_AUTH_URL: https://auth.authentint.localhost
 
       - name: Playwright browsers
         run: npx playwright install --with-deps chromium
