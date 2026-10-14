@@ -10,11 +10,15 @@ from urllib.parse import urlencode
 from . import router
 from authentint.config import settings
 from authentint.clients import queries as clients
+from authentint.infra.models.identity import User
+from authentint.infra.models.identity import UserStatus
 from authentint.infra.database import get_session
 from authentint.sessions.queries import from_cookie
 from authentint.domain.errors import error_page
 from authentint.domain.errors import redirect_error
 from authentint.oidc.codes import issue_code
+from authentint.domain.scopes import grant
+from authentint.audit import audit
 from authentint.flows import interaction
 
 
@@ -58,7 +62,18 @@ async def authorize(request: Request, session=Depends(get_session)):
 
         return RedirectResponse(f"{settings.public_base_url}/login?uid={it.uid}", 302)
 
-    oauth_auth_code = await issue_code(session, params, sso)
+    user = await session.get(User, sso.user_id)
+
+    if user is None or user.status != UserStatus.active:
+        return redirect_error(query["redirect_uri"], "access_denied", query.get("state"))
+
+    requested = set(params.scope.split())
+    granted = grant(requested, user.role, client)
+
+    if granted != requested:
+        await audit.emit(session, "authorize.scope_reduced", actor=user.id, outcome="success", detail={"requested": sorted(requested), "granted": sorted(granted)})
+
+    oauth_auth_code = await issue_code(session, params, sso, " ".join(sorted(granted)))
     redirect_url = f"{params.redirect_uri}{"&" if "?" in params.redirect_uri else "?"}{urlencode({"code": oauth_auth_code, "state": params.state})}"
 
     return RedirectResponse(redirect_url, 302)

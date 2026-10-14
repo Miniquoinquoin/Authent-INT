@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from authentint.oidc.authorize import AuthorizeParams  # hint only: a runtime import would be circular otherwise
 
 
-async def issue_code(session: AsyncSession, params: AuthorizeParams, sso: Sessions) -> str:
+async def issue_code(session: AsyncSession, params: AuthorizeParams, sso: Sessions, scope: str) -> str:
     token = secrets.token_urlsafe(32)
     oauth_auth_code = OAuthAuthorizationCodes(
         code_hash= hash_token(token),
@@ -32,7 +32,7 @@ async def issue_code(session: AsyncSession, params: AuthorizeParams, sso: Sessio
         user_id=sso.user_id,
         session_id=sso.id,
         redirect_uri=params.redirect_uri,
-        scope=params.scope,
+        scope=scope,
         nonce=params.nonce,
         code_challenge=params.code_challenge,
         code_challenge_method=params.code_challenge_method,
