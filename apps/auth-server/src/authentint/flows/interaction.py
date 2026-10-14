@@ -36,7 +36,10 @@ from authentint.clients import queries as clients
 from authentint.domain.scopes import grant
 from authentint.domain.errors import error_url
 from authentint.flows import consent as consents
+from authentint.flows.login import ACCOUNT_LIMIT
+from authentint.flows.login import ACCOUNT_WINDOW
 from authentint.flows.login import AccountLocked
+from authentint.flows.login import account_bucket
 from authentint.flows.login import authenticate
 from authentint.infra.database import get_session
 from authentint.sessions import queries as sessions
@@ -44,6 +47,7 @@ from authentint.infra.models.identity import User
 from authentint.infra.models.oauth import OAuthClients
 from authentint.infra.models.oauth import OAuthInteractions
 from authentint.security import ratelimit
+from authentint.security.identifiers import numero_fiscal_digest
 
 
 TTL = timedelta(minutes=10)
@@ -149,9 +153,13 @@ async def login(uid: str, body: LoginBody, request: Request, response: Response,
 
     # First, before any Argon2 work: one source cannot try more than LOGIN_LIMIT times per LOGIN_WINDOW
     ip = request.client.host if request.client else "unknown"
-    if not await ratelimit.hit(session, f"login:ip:{ip}", LOGIN_LIMIT, LOGIN_WINDOW):
+    # ...and one account cannot be tried more than ACCOUNT_LIMIT times, from however many IPs.
+    # Unknown numeros get a bucket too: the answer never tells whether the account exists
+    ok = (await ratelimit.hit(session, f"login:ip:{ip}", LOGIN_LIMIT, LOGIN_WINDOW)
+          and await ratelimit.hit(session, account_bucket(numero_fiscal_digest(body.numero_fiscal)), ACCOUNT_LIMIT, ACCOUNT_WINDOW))
+    await session.commit()  # the counters must survive whatever happens next (429, 401, 423, 404...)
+    if not ok:
         raise HTTPException(429, "too_many_attempts")
-    await session.commit()  # the counter must survive whatever happens next (401, 423, 404...)
 
     it = await load(session, uid)
     try:

@@ -3,6 +3,8 @@ import hashlib
 import secrets
 import time
 
+from datetime import timedelta
+
 from pydantic import BaseModel
 from pydantic import Field
 from typing import Literal
@@ -14,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.security import HTTPBasicCredentials
 from fastapi import Depends
 from fastapi import Form
+from fastapi import Request
 from fastapi.security import HTTPBasic
 from fastapi.responses import JSONResponse
 
@@ -36,6 +39,11 @@ from authentint.security.passwords import verify_password
 from authentint.oidc.codes import consume_code
 from authentint.oidc import refresh
 from authentint.keys import keystore
+from authentint.security import ratelimit
+
+
+TOKEN_LIMIT = 30                      # /token calls per IP...
+TOKEN_WINDOW = timedelta(minutes=1)   # ...per minute: a browser refreshes every 10 min, a script guessing secrets/codes far more
 
 
 class TokenBody(BaseModel):
@@ -202,8 +210,19 @@ async def refresh_tokens(session: AsyncSession, client: OAuthClients, body: Refr
 
     return response
 
-@router.post("/token")
-async def issue_tokens(body: Annotated[TokenBody | RefreshBody, Form()], credentials: HTTPBasicCredentials | None = Depends(HTTPBasic(auto_error=False)), session: AsyncSession = Depends(get_session)):
+@router.post("/token", responses={429: {"description": "Rate limited (per IP)"}})
+async def issue_tokens(body: Annotated[TokenBody | RefreshBody, Form()], request: Request, credentials: HTTPBasicCredentials | None = Depends(HTTPBasic(auto_error=False)), session: AsyncSession = Depends(get_session)):
+    # Before any Argon2 (client secret) work. Committed now: a 400 below must still count.
+    ip = request.client.host if request.client else "unknown"
+    ok = await ratelimit.hit(session, f"token:ip:{ip}", TOKEN_LIMIT, TOKEN_WINDOW)
+    await session.commit()
+    if not ok:
+        # RFC 6749 §5.2 has no error code for "too many requests", and a 400 would tell the client
+        # its request is wrong. HTTP has the answer: 429 + Retry-After (RFC 6585 §4). The body reuses
+        # the registered OAuth value closest in meaning, temporarily_unavailable (RFC 6749 §4.1.2.1).
+        return JSONResponse({"error": "temporarily_unavailable"}, status_code=429,
+                            headers={"Cache-Control": "no-store", "Retry-After": str(int(TOKEN_WINDOW.total_seconds()))})
+
     client = await authenticate_client(session, body.client_id, credentials, body.grant_type)
 
     if isinstance(body, TokenBody):
