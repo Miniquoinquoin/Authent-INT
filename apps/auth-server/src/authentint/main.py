@@ -7,12 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from authentint import flows
 from authentint import oidc
 from authentint import ops
+from authentint.audit import routes as audit_routes
 from authentint.audit.middleware import RequestIdMiddleware
+from authentint.clients import routes as clients_routes
 from authentint.config import settings
 from authentint.infra import database as db
 from authentint.domain.errors import OAuthError, oauth_error_handler, token_validation_handler
 from authentint.keys import keystore
 from authentint.keys import routes as keys_routes
+from authentint.sessions import routes as sessions_routes
+from authentint.users import routes as users_routes
 
 
 @asynccontextmanager
@@ -33,12 +37,16 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=[settings.public_base_url],
         allow_credentials=True,  # the interaction endpoints set the __Host-session cookie
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],  # PATCH/DELETE: /me/sessions, /admin/*
         allow_headers=["Authorization", "Content-Type"]
     )
     app.include_router(oidc.router)
     app.include_router(flows.router)
     app.include_router(keys_routes.router)
+    app.include_router(users_routes.router)
+    app.include_router(sessions_routes.router)
+    app.include_router(clients_routes.router)
+    app.include_router(audit_routes.router)
     app.include_router(ops.router)
     return app
 

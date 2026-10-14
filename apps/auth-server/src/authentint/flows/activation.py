@@ -38,6 +38,7 @@ from authentint.infra.models.identity import ActivationTokens
 from authentint.infra.models.identity import User
 from authentint.infra.models.identity import UserStatus
 from authentint.security import ratelimit
+from authentint.security.passwords import NewPassword
 from authentint.security.passwords import hash_password
 from authentint.security.passwords import hash_token
 from authentint.users import queries as users
@@ -55,7 +56,23 @@ class ActivationRequest(BaseModel):
 
 class ActivationConfirm(BaseModel):
     token: str = Field(min_length=1, max_length=128)
-    password: str = Field(min_length=12, max_length=256)  # ANSSI: length, not composition rules (ADR §18 q.7)
+    password: NewPassword
+
+
+def issue_link(session: AsyncSession, user: User, ip: str, background: BackgroundTasks, mailer: Mailer) -> None:
+    """
+    A new activation link for `user` (also the admin's /resend-activation). The caller audits and commits:
+    the e-mail leaves after the answer, so it never goes out for a row that was rolled back.
+    """
+
+    token = secrets.token_urlsafe(32)
+    session.add(ActivationTokens(user_id=user.id, token_hash=hash_token(token),
+                                 expires_at=datetime.now(UTC) + TTL, requested_ip=ip))
+
+    # Sent after the answer: a slow mail relay must not make "account exists" slower than "doesn't" (invariant 8)
+    background.add_task(mailer.send, user.email, "Activation de votre compte Authent'INT",
+                        f"Choisissez votre mot de passe : {settings.public_base_url}/activate?token={token}\n"
+                        f"Ce lien expire dans {TTL.seconds // 60} minutes.")
 
 
 @router.post("/account/activation/request", status_code=202, tags=["account"], responses={
@@ -74,18 +91,10 @@ async def request_activation(body: ActivationRequest, request: Request, backgrou
         await session.commit()  # the rate-limit counter
         return ACCEPTED  # unknown, or already active (they use password reset): same answer
 
-    token = secrets.token_urlsafe(32)
-    token_hash = hash_token(token)
-
-    session.add(ActivationTokens(user_id=user.id, token_hash=token_hash,
-                                 expires_at=datetime.now(UTC) + TTL, requested_ip=ip))
+    issue_link(session, user, ip, background, mailer)
     await audit.emit(session, "activation.requested", actor=user.id, outcome="success", detail={})
     await session.commit()
 
-    # Sent after the answer: a slow mail relay must not make "account exists" slower than "doesn't" (invariant 8)
-    background.add_task(mailer.send, user.email, "Activation de votre compte Authent'INT",
-                        f"Choisissez votre mot de passe : {settings.public_base_url}/activate?token={token}\n"
-                        f"Ce lien expire dans {TTL.seconds // 60} minutes.")
     return ACCEPTED
 
 

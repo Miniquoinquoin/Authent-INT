@@ -1,8 +1,14 @@
 import asyncio
 import hashlib
 
+from typing import Annotated
+
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
+from pydantic import Field
+
+# Every password a user chooses (activation, reset, /me/password). ANSSI: length, not composition rules (ADR §18 q.7)
+NewPassword = Annotated[str, Field(min_length=12, max_length=256)]
 
 pwd_hasher = PasswordHasher(time_cost=3, memory_cost=64*1024, parallelism=1) # Default settings, need to be tweaked in the future
 

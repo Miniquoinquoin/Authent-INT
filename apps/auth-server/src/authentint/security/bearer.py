@@ -6,10 +6,14 @@ from joserfc.errors import JoseError
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 from fastapi import Depends
+from uuid import UUID
 
 from authentint.keys import keystore
 from authentint.config import settings
 from authentint.infra.database import get_session
+from authentint.domain.scopes import IDP_AUDIENCE
+from authentint.infra.models.identity import User
+from authentint.infra.models.identity import UserStatus
 
 
 bearer = HTTPBearer()
@@ -64,3 +68,16 @@ def require_audience(audience: str):
         return await verify_access_token(session, cred.credentials, audience)
 
     return dep
+
+# One instance, so FastAPI verifies the token once per request even when several dependencies need it
+idp_claims = require_audience(IDP_AUDIENCE)
+
+async def current_user(claims: dict = Depends(idp_claims), session=Depends(get_session)) -> User:
+    """The /me* user: `sub` of a token naming the IdP. A token outlives a disabled account by up to 10 min: not here."""
+
+    user = await session.get(User, UUID(claims["sub"]))
+
+    if user is None or user.status != UserStatus.active:
+        raise bearer_error(401, "invalid_token")
+
+    return user
