@@ -17,6 +17,7 @@ async def discovery():
     return {"issuer": issuer, "authorization_endpoint": f"{issuer}/authorize", "token_endpoint": f"{issuer}/token",
             "jwks_uri": f"{issuer}/.well-known/jwks.json", "userinfo_endpoint": f"{issuer}/userinfo",
             "end_session_endpoint": f"{issuer}/end-session", "revocation_endpoint": f"{issuer}/revoke",
-            "response_types_supported": ["code"], "grant_types_supported": list(GRANT_TYPES),
+            "response_types_supported": ["code"],
+            "token_endpoint_auth_methods_supported": ["none", "client_secret_basic"], "grant_types_supported": list(GRANT_TYPES),
             "code_challenge_methods_supported": ["S256"], "id_token_signing_alg_values_supported": ["RS256"],
             "scopes_supported": SCOPES_SUPPORTED, "claims_supported": CLAIMS_SUPPORTED, "subject_types_supported": ["public"]}

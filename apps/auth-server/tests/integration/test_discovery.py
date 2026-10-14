@@ -3,6 +3,7 @@
 from sqlalchemy import update
 
 from authentint.config import settings
+from authentint.main import create_app
 from authentint.infra.models.keys import KeyStatus
 from authentint.infra.models.keys import SigningKeys
 
@@ -13,6 +14,15 @@ async def test_discovery_matches_the_issuer(client):
     assert body["jwks_uri"] == f"{settings.issuer}/.well-known/jwks.json"
     assert body["code_challenge_methods_supported"] == ["S256"]
     assert "openid" in body["scopes_supported"]
+
+async def test_discovery_advertises_exactly_what_exists(client):
+    body = (await client.get("/.well-known/openid-configuration")).json()
+    paths = create_app().openapi()["paths"]
+    for endpoint in ("authorization_endpoint", "token_endpoint", "userinfo_endpoint", "revocation_endpoint", "end_session_endpoint"):
+        assert body[endpoint].removeprefix(settings.issuer) in paths
+    assert body["grant_types_supported"] == ["authorization_code", "refresh_token"]
+    assert body["token_endpoint_auth_methods_supported"] == ["none", "client_secret_basic"]
+    assert "at_hash" in body["claims_supported"]
 
 async def test_jwks_publishes_only_public_rs256_keys(client):
     keys = (await client.get("/.well-known/jwks.json")).json()["keys"]
