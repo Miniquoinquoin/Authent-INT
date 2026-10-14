@@ -1,8 +1,8 @@
 /**
  * Token shapes, mirrored from the frozen B0 contract (ADR §7, current_architecture.md §6):
  * apps/auth-server/src/authentint/domain/claims.py (IdToken, AccessToken) and the /token
- * response of B2 (oidc/token.py on feat/b2-oidc). /token is not in the OpenAPI export, hence
- * the hand-written types: change them in the same PR as claims.py.
+ * response of B2 (oidc/token.py). The OpenAPI export declares /token's request (TokenBody) but
+ * no response body, hence the hand-written types: change them in the same PR as claims.py.
  */
 
 export type Role = 'admin' | 'agent' | 'contribuable'

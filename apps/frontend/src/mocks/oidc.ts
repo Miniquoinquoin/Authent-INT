@@ -1,8 +1,8 @@
 /**
- * Fake of B2's /token (apps/auth-server/src/authentint/oidc/token.py on feat/b2-oidc):
+ * Fake of B2's /token (apps/auth-server/src/authentint/oidc/token.py):
  * form-encoded body, `{"error": ...}` 400s, the same response fields, and the same checks
  * that matter to the SPA — single-use code, client_id + redirect_uri bound, PKCE S256.
- * Deleted at seam S2/S3.
+ * The real one is on main since B2 merged; this fake stays for Vitest and `npm run dev:mock`.
  */
 import { http, HttpResponse } from 'msw'
 import { challengeS256 } from '../auth/pkce'

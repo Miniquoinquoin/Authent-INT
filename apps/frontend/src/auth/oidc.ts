@@ -2,10 +2,11 @@
  * The portal as an OIDC Relying Party: the public client `portail-web`, authorization code
  * flow with PKCE S256, `state` and `nonce` (ADR §10).
  *
- * This is the ONLY module that knows B2's endpoints (/authorize, /token, /end-session).
- * Until B2 merges they are mocked (src/mocks/); at seam S2/S3 the mock goes and, if B2's
- * shapes moved, this file and claims.ts are what change.
+ * This is the ONLY module that knows B2's endpoints (/authorize, /token, /end-session): if
+ * B2's shapes move, this file and claims.ts are what change. /authorize and /token are real
+ * on main; /end-session doesn't exist yet. Tests and `npm run dev:mock` use src/mocks/.
  */
+import { apiUrl, type Schemas } from '../api/client'
 import { AUTH_URL, CLIENT_ID, ISSUER, POST_LOGOUT_REDIRECT_URI, REDIRECT_URI, SCOPES } from '../config'
 import { leaveTo } from '../lib/navigation'
 import { decodePayload, type AccessTokenClaims, type IdTokenClaims, type TokenResponse } from './claims'
@@ -87,18 +88,21 @@ function takePending(): Pending | null {
 }
 
 async function exchange(code: string, verifier: string): Promise<TokenResponse> {
+  // The request shape is the contract's (TokenBody in docs/generated/openapi.json); the
+  // response isn't declared there, hence TokenResponse in claims.ts
+  const body: Schemas['TokenBody'] = {
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: REDIRECT_URI,
+    client_id: CLIENT_ID, // public client: no secret, PKCE is the proof
+    code_verifier: verifier,
+  }
   let response: Response
   try {
-    response = await fetch(`${AUTH_URL}/token`, {
+    response = await fetch(apiUrl('/token'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: REDIRECT_URI,
-        client_id: CLIENT_ID, // public client: no secret, PKCE is the proof
-        code_verifier: verifier,
-      }),
+      body: new URLSearchParams(body), // RFC 6749 §4.1.3: form-encoded, not JSON
       credentials: 'omit', // /token authenticates the code + verifier, not a cookie
     })
   } catch {
