@@ -21,6 +21,7 @@
 		output stdout
 		format console
 	}
+	request_header X-Request-Id {http.request.uuid}
 }
 
 # --- OpenID Provider -------------------------------------------------------
