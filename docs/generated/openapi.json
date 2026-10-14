@@ -212,11 +212,11 @@
               }
             }
           },
+          "400": {
+            "description": "Not logged in yet: login comes first"
+          },
           "404": {
             "description": "Unknown or expired uid"
-          },
-          "501": {
-            "description": "Not built yet (B1)"
           },
           "422": {
             "description": "Validation Error",

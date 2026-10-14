@@ -32,6 +32,8 @@ from . import router
 from authentint.config import settings
 from authentint.audit import audit
 from authentint.clients import queries as clients
+from authentint.domain.errors import error_url
+from authentint.flows import consent as consents
 from authentint.flows.login import AccountLocked
 from authentint.flows.login import authenticate
 from authentint.infra.database import get_session
@@ -84,11 +86,11 @@ async def load(session: AsyncSession, uid: str) -> OAuthInteractions:
 
     return it
 
-def next_step(it: OAuthInteractions, client: OAuthClients) -> Prompt | None:
+def next_step(it: OAuthInteractions, client: OAuthClients, has_consent: bool) -> Prompt | None:
     if it.user_id is None:
         return "login"
-    # B1: `if needs_otp: return "otp"` goes here, then skip consent when a consents row already covers it.scope
-    if client.require_consent:
+    # the MFA seam (ADR §2) goes here: `if needs_otp: return "otp"`
+    if client.require_consent and not has_consent:
         return "consent"
     return None
 
@@ -103,7 +105,8 @@ def resume_url(it: OAuthInteractions) -> str:
 
 async def view(session: AsyncSession, it: OAuthInteractions) -> InteractionView:
     client = await clients.get(session, it.client_id)
-    prompt = next_step(it, client)
+    has_consent = it.user_id is not None and await consents.covers(session, it.user_id, it.client_id, set(it.scope.split()))
+    prompt = next_step(it, client, has_consent)
 
     return InteractionView(prompt=prompt, client_name=client.name, scopes=it.scope.split(),
                            redirect_to=resume_url(it) if prompt is None else None)
@@ -150,10 +153,27 @@ async def login(uid: str, body: LoginBody, request: Request, response: Response,
     return await view(session, it)
 
 @router.post("/interaction/{uid}/consent", response_model=InteractionView, responses={
+    400: {"description": "Not logged in yet: login comes first"},
     404: {"description": "Unknown or expired uid"},
-    501: {"description": "Not built yet (B1)"},
 })
 async def consent(uid: str, body: ConsentBody, session: AsyncSession = Depends(get_session)):
     """approve=false ends the flow: redirect_to then carries error=access_denied."""
 
-    raise HTTPException(501, "B1: store the consents row, or end with access_denied")
+    it = await load(session, uid)
+    if it.user_id is None:
+        raise HTTPException(400, "login_required")  # the server decides the order of the steps, not the client
+
+    if not body.approve:
+        it.expires_at = func.now()  # the flow is over: this uid can't be replayed (DB clock, like load())
+        await audit.emit(session, "consent.denied", actor=it.user_id, outcome="failure", detail={"client_id": it.client_id})
+        await session.commit()
+        client = await clients.get(session, it.client_id)
+        return InteractionView(prompt=None, client_name=client.name, scopes=it.scope.split(),
+                               redirect_to=error_url(it.redirect_uri, "access_denied", it.state))
+
+    await consents.record(session, it.user_id, it.client_id, set(it.scope.split()))
+    await audit.emit(session, "consent.granted", actor=it.user_id, outcome="success",
+                     detail={"client_id": it.client_id, "scopes": it.scope.split()})
+    await session.commit()
+
+    return await view(session, it)

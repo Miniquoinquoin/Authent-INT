@@ -29,8 +29,13 @@ class OAuthError(Exception):
 async def oauth_error_handler(request, err: OAuthError):
     return JSONResponse({"error": err.error}, status_code=400)
 
+def error_url(redirect_uri: str, error: AuthorizeErrorCode, state: str | None) -> str:
+    """The client's redirect_uri carrying error= and state= (RFC 6749 §4.1.2.1)."""
+
+    return f"{redirect_uri}{"&" if "?" in redirect_uri else "?"}{urlencode({'error': error, 'state': state or ''})}"
+
 def redirect_error(redirect_uri: str, error: AuthorizeErrorCode, state: str | None) -> RedirectResponse:
-    return RedirectResponse(f"{redirect_uri}{"&" if "?" in redirect_uri else "?"}{urlencode({'error': error, 'state': state or ''})}", 302)
+    return RedirectResponse(error_url(redirect_uri, error, state), 302)
 
 def error_page(error: str) -> HTMLResponse:
     """
