@@ -20,7 +20,7 @@ src/authentint/
 ├── users/ clients/ sessions/   queries.py per feature (routes to come)
 ├── flows/       interaction API (contract frozen, login/consent → B1) · activation · reset (B1)
 ├── oidc/        discovery · jwks · authorize · codes · token (B2)
-└── ops/         /health/live · /health/ready
+└── ops/         /health/live · /health/ready · /metrics (404 at Caddy)
 alembic/         versioned migrations — a deliverable
 scripts/         seed.py (dev only) · export_openapi.py
 tests/           unit (no DB) · integration · security — one rolled-back transaction per test
@@ -37,6 +37,10 @@ make up                # build, run the `migrate` one-shot, start, wait for heal
 make seed              # dev only: 5 users (password in the output) + the portail-web client
 make test              # pytest inside the container, against the compose Postgres
 make openapi           # after touching a route: regenerate docs/generated/openapi.json
+make seed N=400        # dev only: the first N fixture users (the k6 login scenario needs ~400)
+make load              # k6 against the running stack → docs/load-report.md
+make load-scale3       # k6 at 3 replicas + make scale3-check, then back to 1 replica
+make scale3-check      # 3 replicas: one active + one next key, all ready, tokens verify everywhere
 ```
 
 Migrations run in the `migrate` service before `auth-server` starts, so a new

@@ -246,13 +246,14 @@ la source. À confirmer avec le client ([ADR §18](adr/0002-stack-simplifiee.md#
 | `oidc/` discovery · jwks | fait, testé |
 | `oidc/authorize.py` | vérifications 1-7 faites et testées ; chemin SSO → `issue_code` (stub, B2) |
 | `flows/interaction.py` | fait (B1) : `login` (temps constant, verrouillage, rate limit, cookie `__Host-`, audit) · `consent` (mémorisé par utilisateur et client) |
-| `ops/` | `/health/live`, `/health/ready` ; `/metrics` manquant (B6) |
+| `ops/` | `/health/live`, `/health/ready`, `/metrics` (labels = gabarits de route ; 404 côté Caddy) — B6 |
 | `oidc/` codes · token · userinfo · revoke · end_session | B2 |
 | `flows/` activation · reset | fait (B1) : lien aléatoire stocké haché, usage unique, réponse identique ; le reset ferme toutes les sessions |
 | `users/` · `sessions/` queries | fait (B1) : `by_numero_fiscal` (par HMAC), `sessions.create` |
 | routes `/me` · `/admin` | fait (B4) : `GET /me`, `POST /me/password`, `GET` · `DELETE /me/sessions`, `GET /me/audit` (audience `authentint`) ; `/admin/users` (+ `lock`, `unlock`, `resend-activation`), `/admin/clients`, `/admin/sessions` (`svc:admin.users`) ; `/admin/audit` + export CSV plafonné à 10 000 lignes (`svc:admin.audit`). Audit append-only au niveau des privilèges (rôle `authentint_app`) ; `audit.emit` remplit `client_id` et `session_id`. |
 | `apps/mock-services/` | stub qui répond 200 à tout (B3) |
 | frontend | écran de login de démonstration (B5) |
+| B6 · Ops | fait : `/metrics`, images multi-stage (runtime non-root), cache de la clé de signature déchiffrée (`keystore._private_key`), k6 (`load/k6.js`, `docs/load-report.md`), contrôle à 3 réplicas (`scripts/check_scale.sh`), audits de dépendances en CI (`.github/workflows/audit.yml`), modèle de menaces (`docs/threat-model.md`). Kubernetes/Helm hors périmètre (stack compose d'équipe). |
 
 ---
 
@@ -287,7 +288,7 @@ disparaissent aux *seams*, à deux personnes. Détail et justification :
 
 - Une branche par couloir et par sujet, nommée `b1/login`, `b2/token`… PR vers
   `main`, CI verte obligatoire.
-- `make up` · `make test` · `make seed` · `make openapi` — rien d'autre à
+- `make up` · `make test` · `make seed` · `make openapi` (charge : `make seed N=400` puis `make load`, `make load-scale3`, `make scale3-check` — voir `docs/load-report.md`) — rien d'autre à
   connaître pour démarrer ([README de l'auth-server](../apps/auth-server/README.md)).
 - Un invariant de [architecture.md §15](architecture.md#15-invariants) = un
   test dans `tests/security/`, écrit **avant** le code qui le respecte.
