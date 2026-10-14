@@ -12,11 +12,20 @@ from httpx import ASGITransport
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from authentint.external.mailer import get_mailer
 from authentint.infra.database import engine
 from authentint.infra.database import get_session
+from authentint.infra.models.identity import Role
+from authentint.infra.models.identity import User
+from authentint.infra.models.identity import UserStatus
 from authentint.infra.models.oauth import ClientType
 from authentint.infra.models.oauth import OAuthClients
 from authentint.main import create_app
+from authentint.security.identifiers import numero_fiscal_digest
+from authentint.security.passwords import hash_password
+
+
+ALICE_PASSWORD = "correct-horse-battery"
 
 
 @pytest.fixture
@@ -28,11 +37,34 @@ async def s():
             yield session
         await conn.rollback()
 
+class Mailbox:
+    """Stands in for the Mailer: keeps the e-mails instead of sending them."""
+
+    def __init__(self):
+        self.sent: list[dict] = []
+
+    async def send(self, to: str, subject: str, body: str) -> None:
+        self.sent.append({"to": to, "subject": subject, "body": body})
+
 @pytest.fixture
-async def client(s):
-    app = create_app()
-    app.dependency_overrides[get_session] = lambda: s  # the routes share the test's transaction
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://auth.authentint.local") as c:
+def mailbox() -> Mailbox:
+    return Mailbox()
+
+@pytest.fixture
+def make_client(s, mailbox):
+    """A client seen by the server as coming from `ip` (one per simulated browser)."""
+
+    def build(ip: str = "127.0.0.1") -> AsyncClient:
+        app = create_app()
+        app.dependency_overrides[get_session] = lambda: s  # the routes share the test's transaction
+        app.dependency_overrides[get_mailer] = lambda: mailbox  # e-mails land in `mailbox.sent`
+        return AsyncClient(transport=ASGITransport(app=app, client=(ip, 51000)), base_url="https://auth.authentint.local")
+
+    return build
+
+@pytest.fixture
+async def client(make_client):
+    async with make_client() as c:
         yield c
 
 @pytest.fixture
@@ -44,6 +76,34 @@ async def spa(s) -> OAuthClients:
     s.add(c)
     await s.flush()
     return c
+
+@pytest.fixture
+def alice_password() -> str:
+    return ALICE_PASSWORD
+
+@pytest.fixture
+async def alice(s) -> User:
+    """An active contribuable whose password is ALICE_PASSWORD."""
+
+    u = User(external_id="test-alice", numero_fiscal_hmac=numero_fiscal_digest("1801234567890"), email="alice@example.test",
+             nom="Martin", prenom="Alice", password_hash=await hash_password(ALICE_PASSWORD),
+             role=Role.contribuable, status=UserStatus.active)
+    s.add(u)
+    await s.flush()
+    u.numero_fiscal = "1801234567890"  # what alice TYPES; a plain Python attribute, never stored
+    return u
+
+@pytest.fixture
+async def bob(s) -> User:
+    """A contribuable imported from the directory, never activated: no password yet."""
+
+    u = User(external_id="test-bob", numero_fiscal_hmac=numero_fiscal_digest("1807654321098"), email="bob@example.test",
+             nom="Durand", prenom="Bob", password_hash=None,
+             role=Role.contribuable, status=UserStatus.pending_activation)
+    s.add(u)
+    await s.flush()
+    u.numero_fiscal = "1807654321098"  # what bob TYPES; never stored
+    return u
 
 @pytest.fixture
 def authorize_params(spa):

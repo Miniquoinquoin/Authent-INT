@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     public_base_url: str  # SPA origin: /login redirect target and the only CORS origin
     database_url: str
     key_encryption_key: str
+    numero_fiscal_key: str  # HMAC key of users.numero_fiscal_hmac: changing it breaks every login until a re-sync
     access_token_ttl: int = 600
     id_token_ttl: int = 300
     otp_ttl: int = 30

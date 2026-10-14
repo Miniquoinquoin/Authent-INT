@@ -28,6 +28,7 @@ from authentint.external.directory import JsonDirectory, role_for
 from authentint.infra.database import Session
 from authentint.infra.models.identity import User, UserStatus
 from authentint.infra.models.oauth import OAuthClients
+from authentint.security.identifiers import numero_fiscal_digest
 from authentint.security.passwords import hash_password
 
 DEV_PASSWORD = "Authentint-dev-1!"  # DEV ONLY — shared by every seeded user
@@ -51,7 +52,7 @@ async def main():
 
     async with Session() as s:
         for du in users:
-            values = {"numero_fiscal": du.numero_fiscal, "nom": du.nom, "prenom": du.prenom, "email": du.email,
+            values = {"numero_fiscal_hmac": numero_fiscal_digest(du.numero_fiscal), "nom": du.nom, "prenom": du.prenom, "email": du.email,
                       "role": role_for(du.groups), "status": UserStatus.active,
                       "password_hash": password_hash, "password_changed_at": func.now()}
             await s.execute(insert(User).values(external_id=du.external_id, **values)
