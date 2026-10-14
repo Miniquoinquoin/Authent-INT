@@ -250,7 +250,7 @@ la source. À confirmer avec le client ([ADR §18](adr/0002-stack-simplifiee.md#
 | `oidc/` codes · token · userinfo · revoke · end_session | B2 |
 | `flows/` activation · reset | fait (B1) : lien aléatoire stocké haché, usage unique, réponse identique ; le reset ferme toutes les sessions |
 | `users/` · `sessions/` queries | fait (B1) : `by_numero_fiscal` (par HMAC), `sessions.create` |
-| routes `/me` · `/admin` | fait (B4) : `GET /me`, `POST /me/password`, `GET|DELETE /me/sessions`, `GET /me/audit` (audience `authentint`) ; `/admin/users` (+ `lock`, `unlock`, `resend-activation`), `/admin/clients`, `/admin/sessions` (`svc:admin.users`) ; `/admin/audit` + export CSV plafonné à 10 000 lignes (`svc:admin.audit`). Audit append-only au niveau des privilèges (rôle `authentint_app`) ; `audit.emit` remplit `client_id` et `session_id`. |
+| routes `/me` · `/admin` | fait (B4) : `GET /me`, `POST /me/password`, `GET` · `DELETE /me/sessions`, `GET /me/audit` (audience `authentint`) ; `/admin/users` (+ `lock`, `unlock`, `resend-activation`), `/admin/clients`, `/admin/sessions` (`svc:admin.users`) ; `/admin/audit` + export CSV plafonné à 10 000 lignes (`svc:admin.audit`). Audit append-only au niveau des privilèges (rôle `authentint_app`) ; `audit.emit` remplit `client_id` et `session_id`. |
 | `apps/mock-services/` | stub qui répond 200 à tout (B3) |
 | frontend | écran de login de démonstration (B5) |
 
