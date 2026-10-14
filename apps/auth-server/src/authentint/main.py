@@ -15,6 +15,7 @@ from authentint.infra import database as db
 from authentint.domain.errors import OAuthError, oauth_error_handler, token_validation_handler
 from authentint.keys import keystore
 from authentint.keys import routes as keys_routes
+from authentint.ops.metrics import MetricsMiddleware
 from authentint.sessions import routes as sessions_routes
 from authentint.users import routes as users_routes
 
@@ -32,6 +33,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(OAuthError, oauth_error_handler)
     app.add_exception_handler(RequestValidationError, token_validation_handler)
     app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(MetricsMiddleware)  # outside RequestId: its time is in the latency too
     # Added last = outermost: error responses get CORS headers too. Allow-list, never "*" (ADR §16)
     app.add_middleware(
         CORSMiddleware,

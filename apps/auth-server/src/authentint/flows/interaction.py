@@ -46,6 +46,7 @@ from authentint.sessions import queries as sessions
 from authentint.infra.models.identity import User
 from authentint.infra.models.oauth import OAuthClients
 from authentint.infra.models.oauth import OAuthInteractions
+from authentint.ops.metrics import LOGINS
 from authentint.security import ratelimit
 from authentint.security.identifiers import numero_fiscal_digest
 
@@ -159,6 +160,7 @@ async def login(uid: str, body: LoginBody, request: Request, response: Response,
           and await ratelimit.hit(session, account_bucket(numero_fiscal_digest(body.numero_fiscal)), ACCOUNT_LIMIT, ACCOUNT_WINDOW))
     await session.commit()  # the counters must survive whatever happens next (429, 401, 423, 404...)
     if not ok:
+        LOGINS.labels("rate_limited").inc()
         raise HTTPException(429, "too_many_attempts")
 
     it = await load(session, uid)
@@ -166,16 +168,19 @@ async def login(uid: str, body: LoginBody, request: Request, response: Response,
         user = await authenticate(session, body.numero_fiscal, body.password)
     except AccountLocked:
         await session.commit()  # keep the login.locked audit event
+        LOGINS.labels("locked").inc()
         raise HTTPException(423, "account_locked")
 
     if user is None:
         await session.commit()  # keep the failure count (lockout)
+        LOGINS.labels("failure").inc()
         raise HTTPException(401, "invalid_credentials")
 
     sso = await sessions.create(session, user, request)
     it.user_id = user.id
     await audit.emit(session, "login.success", actor=user.id, outcome="success", detail={}, session_id=sso.id)
     await session.commit()  # session + interaction + audit, together
+    LOGINS.labels("success").inc()
 
     response.set_cookie("__Host-session", str(sso.id), httponly=True, secure=True, samesite="lax", path="/")
 

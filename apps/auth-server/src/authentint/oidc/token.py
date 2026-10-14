@@ -40,6 +40,7 @@ from authentint.oidc.codes import consume_code
 from authentint.oidc import refresh
 from authentint.keys import keystore
 from authentint.security import ratelimit
+from authentint.ops.metrics import TOKEN_GRANTS
 
 
 TOKEN_LIMIT = 30                      # /token calls per IP...
@@ -217,17 +218,23 @@ async def issue_tokens(body: Annotated[TokenBody | RefreshBody, Form()], request
     ok = await ratelimit.hit(session, f"token:ip:{ip}", TOKEN_LIMIT, TOKEN_WINDOW)
     await session.commit()
     if not ok:
+        TOKEN_GRANTS.labels(body.grant_type, "failure").inc()
         # RFC 6749 §5.2 has no error code for "too many requests", and a 400 would tell the client
         # its request is wrong. HTTP has the answer: 429 + Retry-After (RFC 6585 §4). The body reuses
         # the registered OAuth value closest in meaning, temporarily_unavailable (RFC 6749 §4.1.2.1).
         return JSONResponse({"error": "temporarily_unavailable"}, status_code=429,
                             headers={"Cache-Control": "no-store", "Retry-After": str(int(TOKEN_WINDOW.total_seconds()))})
 
-    client = await authenticate_client(session, body.client_id, credentials, body.grant_type)
+    try:
+        client = await authenticate_client(session, body.client_id, credentials, body.grant_type)
 
-    if isinstance(body, TokenBody):
-        response = await code_tokens(session, client, body)
-    else:
-        response = await refresh_tokens(session, client, body)
+        if isinstance(body, TokenBody):
+            response = await code_tokens(session, client, body)
+        else:
+            response = await refresh_tokens(session, client, body)
+    except OAuthError:
+        TOKEN_GRANTS.labels(body.grant_type, "failure").inc()
+        raise
+    TOKEN_GRANTS.labels(body.grant_type, "success").inc()
 
     return JSONResponse(response, headers={"Cache-Control": "no-store"})

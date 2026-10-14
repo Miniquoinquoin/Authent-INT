@@ -29,6 +29,10 @@
 auth.authentint.localhost {
 	tls internal
 	import commun
+	# /metrics is for scrapers on the docker network only (http://auth-server:8000/metrics):
+	# it reveals traffic, error rates and route usage. Same 404 as any unknown path (ADR §9 Ops).
+	@metrics path /metrics /metrics/*
+	respond @metrics 404
 	reverse_proxy auth-server:8000
 }
 
