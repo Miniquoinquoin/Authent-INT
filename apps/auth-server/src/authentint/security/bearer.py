@@ -15,6 +15,11 @@ from authentint.infra.database import get_session
 bearer = HTTPBearer()
 
 
+def bearer_error(status: int, error: str) -> HTTPException:
+    """RFC 6750 §3: a Bearer failure says why in WWW-Authenticate, for the client to tell "refresh" from "re-consent"."""
+
+    return HTTPException(status, error, headers={"WWW-Authenticate": f'Bearer error="{error}"'})
+
 async def verify_access_token(session: AsyncSession, token: str, audience: str | None = None) -> dict:
     """
     Signature (RS256 pinned), typ, iss, exp; and `aud` must contain `audience` when given (ADR §11):
@@ -24,17 +29,17 @@ async def verify_access_token(session: AsyncSession, token: str, audience: str |
     try:
         tok = jwt.decode(token, KeySet.import_key_set(await keystore.jwks(session)), algorithms=["RS256"])
         if tok.header.get("typ") != "at+jwt":
-            raise HTTPException(401, "invalid_token")
+            raise bearer_error(401, "invalid_token")
         jwt.JWTClaimsRegistry(
             iss={"essential": True, "value": settings.issuer},
             exp={"essential": True},
         ).validate(tok.claims)
     except JoseError:
-        raise HTTPException(401, "invalid_token")
+        raise bearer_error(401, "invalid_token")
 
     aud = tok.claims.get("aud")
     if audience is not None and audience not in (aud if isinstance(aud, list) else [aud]):
-        raise HTTPException(401, "invalid_token")
+        raise bearer_error(401, "invalid_token")
 
     return tok.claims
 
@@ -46,7 +51,7 @@ def require_scope(scope: str):
         claims = await verify_access_token(session, cred.credentials)
 
         if scope not in claims.get("scope", "").split():
-            raise HTTPException(403, "insufficient_scope")
+            raise bearer_error(403, "insufficient_scope")
 
         return claims
 
