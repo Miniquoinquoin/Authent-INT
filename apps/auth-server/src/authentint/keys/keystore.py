@@ -62,7 +62,6 @@ async def rotate(session: AsyncSession) -> None:
     old.not_after = datetime.now(UTC) + timedelta(seconds=max(settings.access_token_ttl, settings.id_token_ttl))
     new.status = KeyStatus.active
     session.add(_new_key(KeyStatus.next))
-    await session.commit()
 
 async def jwks(session: AsyncSession) -> dict:
     rows = await session.scalars(select(SigningKeys).where(SigningKeys.not_after > func.now()))

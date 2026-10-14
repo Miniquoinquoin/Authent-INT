@@ -81,22 +81,22 @@ config:
   theme: neutral
 ---
 flowchart LR
-    host["/etc/hosts de la machine<br/>127.0.0.1 → auth.authentint.local"]
+    host["résolution native *.localhost<br/>127.0.0.1 → auth.authentint.localhost"]
     dns["DNS interne Docker<br/>alias → conteneur caddy"]
     caddy["caddy"]
 
     b([Navigateur]) --> host --> caddy
     s([svc-impots]) --> dns --> caddy
 
-    caddy -->|"https://auth.authentint.local/…"| ok(["une seule URL,<br/>un seul issuer"])
+    caddy -->|"https://auth.authentint.localhost/…"| ok(["une seule URL,<br/>un seul issuer"])
 ```
 
 | Hôte | Routé vers | Résolu par |
 | --- | --- | --- |
-| `auth.authentint.local` | `auth-server:8000` | `/etc/hosts` (navigateur) · alias Docker (conteneurs) |
-| `app.authentint.local` | `frontend:80` | idem |
-| `impots.authentint.local` | `svc-impots:8001` | idem |
-| `cadastre.authentint.local` | `svc-cadastre:8001` | idem |
+| `auth.authentint.localhost` | `auth-server:8000` | natif `*.localhost` (navigateur) · alias Docker (conteneurs) |
+| `app.authentint.localhost` | `frontend:80` | idem |
+| `impots.authentint.localhost` | `svc-impots:8001` | idem |
+| `cadastre.authentint.localhost` | `svc-cadastre:8001` | idem |
 
 Sans les alias, `svc-impots` devrait appeler `http://auth-server:8000/...`
 pour récupérer le JWKS — une URL différente de l'`issuer`, en clair, et le
@@ -134,10 +134,10 @@ services:
     networks:
       edge:
         aliases:            # même URL pour le navigateur et les conteneurs
-          - auth.authentint.local
-          - app.authentint.local
-          - impots.authentint.local
-          - cadastre.authentint.local
+          - auth.authentint.localhost
+          - app.authentint.localhost
+          - impots.authentint.localhost
+          - cadastre.authentint.localhost
     healthcheck:
       test: ["CMD", "test", "-f", "/data/caddy/pki/authorities/local/root.crt"]
       interval: 2s
@@ -148,7 +148,7 @@ services:
 
   auth-server:
     environment:
-      ISSUER: https://auth.authentint.local
+      ISSUER: https://auth.authentint.localhost
       DATABASE_URL: postgresql+asyncpg://authentint_app@postgres:5432/authentint
     networks: [edge, data]  # le seul service sur les deux
     depends_on:
@@ -156,7 +156,7 @@ services:
 
   svc-impots:
     environment:
-      ISSUER: https://auth.authentint.local
+      ISSUER: https://auth.authentint.localhost
       AUDIENCE: svc-impots
       CA_BUNDLE: /caddy-data/caddy/pki/authorities/local/root.crt
     volumes:
@@ -257,7 +257,7 @@ sequenceDiagram
 ```
 
 Le diagramme est logique. **Physiquement, les deux appels de `svc-impots` vers
-`auth-server` passent par `caddy`** — via l'alias DNS `auth.authentint.local`
+`auth-server` passent par `caddy`** — via l'alias DNS `auth.authentint.localhost`
 sur le réseau `edge` (§1.1). C'est ce qui garantit que l'URL du JWKS et le
 claim `iss` sont la même chaîne, et que le chemin TLS est exercé en
 développement.

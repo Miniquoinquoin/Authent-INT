@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 from fastapi.responses import JSONResponse
 from fastapi.responses import RedirectResponse
 from fastapi.responses import HTMLResponse
+from fastapi.exception_handlers import request_validation_exception_handler
 
 
 # The only `error=` values the server may emit: RFC 6749 §4.1.2.1 (/authorize) and §5.2 (/token)
@@ -28,6 +29,19 @@ class OAuthError(Exception):
 
 async def oauth_error_handler(request, err: OAuthError):
     return JSONResponse({"error": err.error}, status_code=400)
+
+async def token_validation_handler(request, exc) -> JSONResponse:
+    # Every route othen than /token goes to FastAPI's default handler (keeping their 422)
+    if request.url.path != "/token":
+        return await request_validation_exception_handler(request, exc)
+
+    code = "invalid_request"
+
+    # A MISSING grant_type is a missing parameter (invalid_request); only an unknown value is unsupported
+    if any("grant_type" in e["loc"] and e["type"] != "missing" for e in exc.errors()):
+        code = "unsupported_grant_type"
+
+    return JSONResponse({"error": code}, headers={"Cache-Control": "no-store"}, status_code=400)
 
 def error_url(redirect_uri: str, error: AuthorizeErrorCode, state: str | None) -> str:
     """The client's redirect_uri carrying error= and state= (RFC 6749 §4.1.2.1)."""

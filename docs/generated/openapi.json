@@ -62,6 +62,50 @@
         }
       }
     },
+    "/token": {
+      "post": {
+        "tags": [
+          "oidc"
+        ],
+        "summary": "Exchange Code",
+        "operationId": "exchange_code_token_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ]
+      }
+    },
     "/account/activation/request": {
       "post": {
         "tags": [
@@ -641,6 +685,42 @@
         ],
         "title": "ResetRequest"
       },
+      "TokenBody": {
+        "properties": {
+          "grant_type": {
+            "type": "string",
+            "const": "authorization_code",
+            "title": "Grant Type"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "redirect_uri": {
+            "type": "string",
+            "title": "Redirect Uri"
+          },
+          "client_id": {
+            "type": "string",
+            "title": "Client Id"
+          },
+          "code_verifier": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 43,
+            "title": "Code Verifier"
+          }
+        },
+        "type": "object",
+        "required": [
+          "grant_type",
+          "code",
+          "redirect_uri",
+          "client_id",
+          "code_verifier"
+        ],
+        "title": "TokenBody"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -683,6 +763,10 @@
       }
     },
     "securitySchemes": {
+      "HTTPBasic": {
+        "type": "http",
+        "scheme": "basic"
+      },
       "HTTPBearer": {
         "type": "http",
         "scheme": "bearer"

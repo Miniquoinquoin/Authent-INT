@@ -57,7 +57,7 @@ authentint/
 ├── apps/auth-server/                                            → §auth-server
 ├── apps/frontend/                                               → §frontend
 ├── apps/mock-services/                                          → §mock-services
-├── fixtures/users.json                                          → §fixtures
+├── fixtures/ldap/users.json                                     → §auth-server (étape 9)
 ├── k8s/                                                         → §k8s
 ├── load/                                                        → §load
 └── .github/workflows/                                           → §ci
@@ -102,13 +102,13 @@ deux, c'est le seul pont.
   caddy:
     networks:
       edge:
-        aliases: [auth.authentint.local, app.authentint.local, …]
+        aliases: [auth.authentint.localhost, app.authentint.localhost, …]
 ```
 
 Docker fournit un DNS interne : chaque conteneur est joignable par son nom de
 service. Un *alias* ajoute d'autres noms. Ici `caddy` répond aussi à
-`auth.authentint.local`, donc quand `svc-impots` appelle
-`https://auth.authentint.local/…`, il tombe sur Caddy, **exactement comme le
+`auth.authentint.localhost`, donc quand `svc-impots` appelle
+`https://auth.authentint.localhost/…`, il tombe sur Caddy, **exactement comme le
 navigateur**. C'est ce qui fait que l'`issuer` est la même chaîne dedans et
 dehors ([M2](#m2--caddy-tls-et-noms-dhôte)).
 
@@ -225,13 +225,13 @@ certification locale et émettre un certificat par nom d'hôte : pas de
 **Comment on s'en sert ici.** Le fichier existe. Chaque bloc est un site :
 
 ```caddyfile
-auth.authentint.local {
+auth.authentint.localhost {
 	tls internal
 	reverse_proxy auth-server:8000
 }
 ```
 
-« Quand une requête arrive avec `Host: auth.authentint.local`, présente le
+« Quand une requête arrive avec `Host: auth.authentint.localhost`, présente le
 certificat de ce nom, puis transmets à `auth-server` port 8000 sur le réseau
 Docker. » `auth-server:8000` est résolu par le DNS Docker.
 
@@ -313,31 +313,54 @@ C'est le gros morceau. Dans l'ordre de construction :
 
 ```
 apps/auth-server/
-├── pyproject.toml          1. projet + dépendances
-├── Dockerfile              2. remplace le stub
-├── alembic/                3. schéma v1 (contrat B0)
+├── pyproject.toml · uv.lock
+├── Dockerfile · entrypoint.sh
+├── alembic/
 ├── src/authentint/
-│   ├── main.py             4. app FastAPI, lifespan, routers
-│   ├── config.py           5. Settings
-│   ├── infra/                 database · models — rien d'autre
-│   ├── security/              passwords · ratelimit · bearer
-│   ├── external/              directory · mailer
-│   ├── keys/                  keystore · /admin/keys/rotate
-│   ├── domain/             6. pydantic : claims, scopes, erreurs — zéro I/O
-│   ├── audit/              7. emit() + middleware request_id
-│   ├── flows/              8. interaction · activation · reset      (B1)
-│   ├── oidc/               9. discovery · jwks · authorize · token · userinfo · revoke · end_session (B2)
-│   ├── users/ clients/ sessions/  10. queries.py + /me · /admin      (B4)
-│   └── ops/                   /health/* · /metrics
-├── scripts/seed.py         make seed
+│   ├── main.py · config.py
+│   ├── infra/        database · models — connexion et tables, rien d'autre
+│   ├── domain/       claims · scopes · errors — zéro I/O
+│   ├── security/     passwords · ratelimit · bearer
+│   ├── external/     directory · mailer
+│   ├── audit/        emit · middleware · routes
+│   ├── keys/         keystore · routes (rotation)
+│   ├── users/ · clients/ · sessions/      queries · routes
+│   ├── oidc/         discovery · jwks · authorize · token · userinfo · revoke · end_session
+│   ├── flows/        interaction · activation · reset
+│   └── ops/          routes (/health/*, /metrics)
+├── scripts/seed.py
 └── tests/
 ```
 
-Pourquoi ce découpage : `infra/` est tout ce qui touche l'extérieur (base,
-fichiers, réseau), `domain/` est de la logique pure testable sans rien
-démarrer, et les trois autres sont des groupes de routes HTTP. Une route
-reçoit ce dont elle a besoin d'`infra/` par injection, applique `domain/`, et
-répond. Rien dans `oidc/` ne sait que la base est Postgres.
+**Ordre de construction** — celui des sections qui suivent. Chaque étape
+n'utilise que ce que les précédentes ont construit :
+
+1. `pyproject.toml`, `Dockerfile`, `entrypoint.sh`
+2. `config.py`
+3. `infra/` — `database.py` puis les modèles
+4. `alembic/` — la migration v1 (contrat B0)
+5. `main.py` — version minimale, qui grandit à chaque étape
+6. `tests/` — `conftest.py` ; à partir d'ici chaque fichier commence par son test
+7. `domain/`
+8. `security/passwords.py`, `security/ratelimit.py`
+9. `external/` et `fixtures/ldap/users.json`
+10. `audit/`
+11. `keys/keystore.py`
+12. `security/bearer.py`, puis `keys/routes.py` (première route protégée)
+13. `users/` · `clients/` · `sessions/`
+14. `scripts/seed.py`
+15. `oidc/` (brick B2), contre un `fake_authenticate()`
+16. `flows/` (brick B1), qui remplace `fake_authenticate()`
+17. `ops/`
+
+Pourquoi ce découpage : un dossier par **fonctionnalité** (`keys/`, `users/`,
+`sessions/`, `flows/`, `oidc/`…), chacun avec ses requêtes et ses routes.
+Ce que plusieurs fonctionnalités partagent vit à part : `infra/` n'est que la
+connexion et les tables, `domain/` est de la logique pure testable sans rien
+démarrer, `security/` les primitives de protection, `external/` l'annuaire et
+le mail. Une fonctionnalité peut importer le `queries.py` d'une autre, jamais
+ses routes. Il n'y a pas de dossier `admin/` : une route admin vit dans la
+fonctionnalité qu'elle gère, protégée par `require_scope`.
 
 ### `pyproject.toml` et `Dockerfile`
 
@@ -356,7 +379,8 @@ Il remplace `pip` + `venv` + `pip-tools` en un binaire, et il est rapide.
 cd apps/auth-server
 uv init --package auth-server            # crée pyproject.toml et src/
 uv add fastapi "uvicorn[standard]" "sqlalchemy[asyncio]" asyncpg alembic \
-       joserfc argon2-cffi pydantic-settings httpx cryptography
+       joserfc argon2-cffi pydantic-settings "pydantic[email]" \
+       python-multipart prometheus-client httpx cryptography
 uv add --dev pytest pytest-asyncio
 uv run pytest                            # exécute dans le venv, sans l'activer
 ```
@@ -373,6 +397,9 @@ sans savoir pourquoi :
 | `joserfc` | Signer / vérifier des JWT, publier un JWKS | [M9](#m9--jwt-jwks-et-rotation-des-clés) |
 | `argon2-cffi` | Hacher les mots de passe | [M6](#m6--mots-de-passe-et-credentials) |
 | `pydantic-settings` | Lire la config depuis l'environnement | |
+| `pydantic[email]` | Le type `EmailStr` de `DirectoryUser` (ADR §6) | |
+| `python-multipart` | Lire les formulaires : `/token` reçoit du `application/x-www-form-urlencoded` | [M7](#m7--oauth-20-et-pkce) |
+| `prometheus-client` | L'endpoint `/metrics` d'`ops/` | [M12](#m12--observabilité-et-charge) |
 | `httpx` | Client HTTP (tests, et les mocks pour le JWKS) | |
 | `cryptography` | Chiffrer les clés privées en base (Fernet) | |
 
@@ -386,13 +413,29 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project   # couche cachée tant que le lock ne change pas
 COPY src ./src
 RUN uv sync --frozen --no-dev
+COPY alembic.ini entrypoint.sh ./
+COPY alembic ./alembic
+COPY scripts ./scripts
 
 FROM python:3.13-slim
 WORKDIR /app
 COPY --from=build /app /app
 USER 1000                                            # jamais root dans le conteneur
-CMD ["/app/.venv/bin/uvicorn", "authentint.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/entrypoint.sh"]
 ```
+
+Et `entrypoint.sh` (exécutable, `chmod +x`) :
+
+```sh
+#!/bin/sh
+set -e
+# /app/.venv/bin/alembic upgrade head      ← décommenter à l'étape alembic/
+exec /app/.venv/bin/uvicorn authentint.main:app --host 0.0.0.0 --port 8000
+```
+
+`exec` remplace le shell par uvicorn : c'est lui qui reçoit le `SIGTERM` de
+Docker et s'arrête proprement. Le conteneur ne démarre vraiment qu'à partir
+de l'étape `main.py` ; avant, il redémarre en boucle — c'est normal.
 
 *Pourquoi deux étapes :* la première contient `uv` et les outils de build, la
 seconde ne contient que Python et le venv. L'image finale est plus petite et
@@ -410,6 +453,102 @@ de code ne réinstalle pas les dépendances.
 - `uv` projets : <https://docs.astral.sh/uv/guides/projects/> ; dans Docker : <https://docs.astral.sh/uv/guides/integration/docker/>
 - Multi-stage : <https://docs.docker.com/build/building/multi-stage/>
 - FastAPI en conteneur (ce qu'il ne faut *pas* faire, notamment Gunicorn dans Kubernetes) : <https://fastapi.tiangolo.com/deployment/docker/>
+
+### `src/authentint/config.py`
+
+**Le problème.** Presque tous les modules ont besoin de la configuration
+(issuer, URL de la base, durées de vie des jetons). Elle doit être lue et
+validée **une fois**, au démarrage, et nulle part ailleurs.
+
+```python
+from pydantic import model_validator
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    dev: bool = False                    # DEV=true uniquement via docker-compose.dev.yml ; jamais en prod
+    issuer: str                          # lu depuis ISSUER
+    public_base_url: str                 # URL du frontend (redirection /login)
+    database_url: str                    # lu depuis DATABASE_URL
+    key_encryption_key: str
+    access_token_ttl: int = 600
+    id_token_ttl: int = 300
+    code_ttl: int = 60
+    fixtures_path: str | None = None     # l'annuaire factice lu par scripts/seed.py, dev uniquement
+
+    @model_validator(mode="after")
+    def _fixtures_only_in_dev(self):
+        if not self.dev:
+            self.fixtures_path = None                          # jamais d'utilisateurs factices hors dev
+        elif self.fixtures_path is None:
+            self.fixtures_path = "/fixtures/ldap/users.json"   # monté par docker-compose.dev.yml
+        return self
+
+settings = Settings()
+```
+
+*Pourquoi `dev` est lu depuis l'environnement et pas écrit en dur :* un
+`DEV = True` dans le code finirait dans l'image de production. Ici, seul
+`docker-compose.dev.yml` pose `DEV=true` ; partout ailleurs, même si
+`FIXTURES_PATH` traîne dans l'environnement, le validateur le remet à `None`.
+
+`pydantic-settings` lit chaque champ depuis la variable d'environnement de
+même nom (insensible à la casse), valide le type, et **refuse de démarrer** si
+une variable obligatoire manque. C'est bien mieux qu'un `os.environ.get` qui
+renvoie `None` et plante deux heures plus tard.
+
+Chaque champ sans valeur par défaut doit exister dans l'environnement du
+conteneur : `docker-compose.yml` fournit `ISSUER`, `PUBLIC_BASE_URL`,
+`DATABASE_URL` et `KEY_ENCRYPTION_KEY` (lu depuis `.env`). Un champ ajouté ici
+= une ligne ajoutée dans `environment:` du compose, sinon le conteneur refuse
+de démarrer.
+
+- <https://docs.pydantic.dev/latest/concepts/pydantic_settings/>
+
+### `src/infra/` — connexion et modèles, rien d'autre
+
+**Le problème.** Ouvrir le pool de connexions et décrire les tables. C'est
+tout. Dès qu'un fichier *fait* quelque chose avec la base (requête, verrou,
+compteur), il appartient à la fonctionnalité qui en a besoin, pas à `infra/`.
+
+```
+infra/
+├── database.py   Base, engine, Session, get_session
+└── models/       identity · oauth · audit · keys   (un fichier par groupe de l'ADR §8)
+```
+
+#### `database.py`
+
+```python
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from authentint.config import settings
+
+engine = create_async_engine(settings.database_url)
+Session = async_sessionmaker(engine, expire_on_commit=False)
+
+async def get_session():
+    async with Session() as s:
+        yield s          # une session par requête, fermée automatiquement
+```
+
+Puis dans une route : `async def token(s: AsyncSession = Depends(get_session))`.
+L'*engine* est le pool de connexions (un par processus) ; la *session* est une
+unité de travail (une par requête). `expire_on_commit=False` évite qu'après un
+`commit()` chaque accès à un attribut refasse une requête — piège classique en
+async.
+
+- <https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html>
+- Modèles 2.0 (`Mapped[]`, `mapped_column`) : <https://docs.sqlalchemy.org/en/20/orm/declarative_tables.html>
+
+#### `models/`
+
+Une classe par table de l'[ADR §8](adr/0002-stack-simplifiee.md#8-modèle-de-données),
+un fichier par groupe (`identity`, `oauth`, `audit`, `keys`), et un
+`models/__init__.py` qui importe les quatre pour que `Base.metadata` connaisse
+toutes les tables. Le pas-à-pas (types Postgres, enums, clés étrangères par
+chaîne) est dans [B0_plan.md](B0_plan.md). Les noms de classes utilisés dans
+la suite : `User`, `ActivationTokens`, `PasswordResetTokens`, `OAuthClients`,
+`OAuthInteractions`, `OAuthAuthorizationCodes`, `OAuthRefreshTokens`,
+`OAuthConsents`, `Sessions`, `AuditEvents`, `RateLimits`, `SigningKeys`.
 
 ### `alembic/` — le schéma est un livrable
 
@@ -429,7 +568,7 @@ les migrations manquantes dans l'ordre.
 uv run alembic init -t async alembic        # -t async : le gabarit pour SQLAlchemy asyncio
 ```
 
-Dans `alembic/env.py`, deux lignes à changer : `target_metadata = Base.metadata`
+Dans `alembic/env.py`, deux lignes à changer : `from authentint.infra.models import Base` puis `target_metadata = Base.metadata`
 (pour que l'autogenerate connaisse nos modèles) et l'URL lue depuis
 `settings.database_url`.
 
@@ -452,8 +591,8 @@ def upgrade():
 Ensuite, à chaque changement de modèle : `uv run alembic revision
 --autogenerate -m "add locked_until"`, relire le fichier généré, commiter.
 
-Elle tourne au démarrage du conteneur, dans un `entrypoint.sh` : `alembic
-upgrade head && exec uvicorn …`. Avec trois réplicas, trois processus tentent
+Elle tourne au démarrage du conteneur : décommenter la ligne `alembic
+upgrade head` d'`entrypoint.sh` ([§Dockerfile](#pyprojecttoml-et-dockerfile)). Avec trois réplicas, trois processus tentent
 la migration en même temps ; Alembic verrouille sa table de version, un seul
 passe, les autres attendent puis constatent que c'est fait.
 
@@ -483,26 +622,37 @@ regroupées en `APIRouter` par package et attachées avec `include_router`. Le
 
 **Comment on s'en sert ici.**
 
+Version minimale, à écrire maintenant :
+
 ```python
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from authentint.infra import database as db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with db.Session() as s:
-        await keystore.ensure_active_key(s)   # advisory lock dedans : un seul réplica génère
     yield
     await db.engine.dispose()
 
 def create_app() -> FastAPI:
     app = FastAPI(lifespan=lifespan, docs_url=None)   # pas de Swagger UI public sur un IdP
-    app.add_middleware(RequestIdMiddleware)
-    for r in (oidc.router, flows.router, admin.router, ops.router):
-        app.include_router(r)
     return app
 
 app = create_app()
 ```
+
+Puis chaque étape y ajoute sa ligne, et rien d'autre :
+
+| Étape | Ajout dans `main.py` |
+| --- | --- |
+| `domain/` | `app.add_exception_handler(OAuthError, oauth_error_handler)` |
+| `audit/` | `app.add_middleware(RequestIdMiddleware)` |
+| `keys/` | dans `lifespan`, avant le `yield` : `async with db.Session() as s: await keystore.ensure_active_key(s)` (advisory lock dedans : un seul réplica génère) |
+| `keys/routes.py` · `audit/routes.py` · `users/` · `clients/` · `sessions/` · `oidc/` · `flows/` · `ops/` | `app.include_router(<paquet>.router)` |
+
+Chaque paquet expose son `router` dans son `__init__.py` :
+`from .routes import router` (ou, pour `oidc/` et `flows/`, un `APIRouter`
+qui inclut ceux de leurs fichiers).
 
 `create_app()` plutôt qu'un `app` global : les tests peuvent en créer une par
 test avec des réglages différents.
@@ -514,75 +664,175 @@ chose est au mauvais endroit.
 - Découpage en routers : <https://fastapi.tiangolo.com/tutorial/bigger-applications/>
 - `lifespan` : <https://fastapi.tiangolo.com/advanced/events/>
 
-### `src/infra/` — ce qui touche le monde extérieur
+### `tests/`
 
-> **Où c'est rangé dans le code.** Cette section décrit les *ports* vers
-> l'extérieur. Dans le code, ils sont répartis par rôle (voir
-> [current_architecture.md §3](current_architecture.md#3-qui-a-le-droit-dimporter-qui)) :
-> `config.py`, `infra/database.py`, `security/`, `external/`, `keys/`.
-> `infra/` ne garde que la connexion et les modèles.
+**Le problème.** Chaque invariant de sécurité doit être un test qui échoue si
+on le casse. Et les tests doivent tourner contre le vrai Postgres, pas un
+SQLite qui accepte ce que Postgres refuse.
 
-**Le problème.** Le code métier doit pouvoir dire « vérifie ce mot de passe »,
-« trouve cet utilisateur », « envoie ce mail » sans savoir *comment*. Parce que
-le *comment* va changer : le JSON deviendra un LDAP, la console deviendra un
-SMTP, et peut-être Postgres deviendra Valkey pour le rate limit. Si le code
-métier connaît l'implémentation, chaque changement le traverse.
+**L'outil.** `pytest` exécute les fonctions `test_*`. `httpx.ASGITransport`
+appelle l'application FastAPI **directement en mémoire**, sans serveur ni
+réseau, mais avec le vrai cycle requête/réponse. Les *fixtures* pytest
+fournissent aux tests ce dont ils ont besoin (un client, une session, un
+utilisateur seedé).
 
-**L'outil.** Un `typing.Protocol` par port. Un `Protocol` décrit une forme
-(« un objet qui a une méthode `hit(bucket, limit, window) -> bool` ») sans
-héritage : n'importe quelle classe qui a cette méthode *est* un `RateLimiter`.
-Le code métier reçoit un `RateLimiter` par injection de dépendance FastAPI
-(`Depends`) et ne sait pas lequel.
+**Comment on s'en sert ici.**
 
-**Comment on s'en sert ici.** Un fichier par port, chaque fichier = le
-`Protocol` + son implémentation unique d'aujourd'hui.
-
-#### `config.py`
-
-```python
-from pydantic_settings import BaseSettings
-
-class Settings(BaseSettings):
-    issuer: str                          # lu depuis ISSUER
-    database_url: str                    # lu depuis DATABASE_URL
-    key_encryption_key: str
-    access_token_ttl: int = 600
-    id_token_ttl: int = 300
-    code_ttl: int = 60
-
-settings = Settings()
+```
+tests/
+├── conftest.py        fixtures partagées
+├── unit/              domain/ · pkce · scopes · password — sans base
+├── integration/       une classe par router, contre le Postgres du compose
+├── test_smoke.py      le flow complet, ~30 lignes (ADR §15)
+└── security/          une assertion de l'ADR §15 par fichier
 ```
 
-`pydantic-settings` lit chaque champ depuis la variable d'environnement de
-même nom (insensible à la casse), valide le type, et **refuse de démarrer** si
-une variable obligatoire manque. C'est bien mieux qu'un `os.environ.get` qui
-renvoie `None` et plante deux heures plus tard.
-
-- <https://docs.pydantic.dev/latest/concepts/pydantic_settings/>
-
-#### `infra/database.py`
-
 ```python
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+# conftest.py
+@pytest.fixture
+async def client():
+    async with AsyncClient(transport=ASGITransport(app=create_app()),
+                           base_url="https://auth.authentint.localhost") as c:
+        yield c
 
-engine = create_async_engine(settings.database_url)
-Session = async_sessionmaker(engine, expire_on_commit=False)
-
-async def get_session():
-    async with Session() as s:
-        yield s          # une session par requête, fermée automatiquement
+@pytest.fixture
+async def s():
+    async with engine.connect() as conn:
+        await conn.begin()
+        async with AsyncSession(bind=conn) as session:
+            yield session
+        await conn.rollback()          # chaque test repart d'une base propre
 ```
 
-Puis dans une route : `async def token(s: AsyncSession = Depends(get_session))`.
-L'*engine* est le pool de connexions (un par processus) ; la *session* est une
-unité de travail (une par requête). `expire_on_commit=False` évite qu'après un
-`commit()` chaque accès à un attribut refasse une requête — piège classique en
-async.
+Le premier test à écrire, tout de suite : `GET /docs` → 404 (le Swagger est
+bien coupé). Le suivant est un exemple de l'étape `oidc/` — `seeded_client`
+est une fixture à ajouter quand `clients/` existe :
 
-- <https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html>
-- Modèles 2.0 (`Mapped[]`, `mapped_column`) : <https://docs.sqlalchemy.org/en/20/orm/declarative_tables.html>
+```python
+# security/test_redirect_uri.py
+async def test_bad_redirect_uri_never_redirects(client, seeded_client):
+    r = await client.get("/authorize", params={"client_id": seeded_client.id,
+                         "redirect_uri": "https://evil.example/cb", …})
+    assert r.status_code == 400          # pas 302
+    assert "location" not in r.headers
+```
 
-#### `security/passwords.py`
+`make test` = `docker compose exec auth-server pytest` : les tests tournent
+**dans** le conteneur, où `postgres:5432` est joignable. Pas de base de test
+séparée.
+
+**Lire.**
+- Fixtures : <https://docs.pytest.org/en/stable/how-to/fixtures.html>
+- Transaction rollbackée par test : <https://docs.sqlalchemy.org/en/20/orm/session_transaction.html#joining-a-session-into-an-external-transaction-such-as-for-test-suites>
+- `ASGITransport` : <https://www.python-httpx.org/advanced/transports/#asgitransport>
+
+Concept : [M11](#m11--tests).
+
+### `src/domain/` — pur, sans I/O
+
+**Le problème.** Le calcul des scopes accordés, la forme des claims, les codes
+d'erreur OAuth : ce sont des règles. Elles doivent être testables en une
+milliseconde, sans base ni réseau, et lisibles par quelqu'un qui relit la
+sécurité.
+
+**Comment on s'en sert ici.** Des modèles Pydantic et des fonctions pures.
+
+```python
+# scopes.py
+from authentint.infra.models.identity import Role
+from authentint.infra.models.oauth import OAuthClients
+
+ALLOWED: dict[Role, frozenset[str]] = {
+    Role.admin: frozenset({"svc:admin.users", "svc:admin.audit", "svc:impots.read", …}),
+    Role.agent: frozenset({"svc:impots.read", "svc:impots.write", "svc:cadastre.read"}),
+    Role.contribuable: frozenset({"svc:impots.read"}),
+}
+
+def grant(requested: set[str], role: Role, client: OAuthClients) -> set[str]:
+    return requested & ALLOWED[role] & set(client.allowed_scopes)   # ADR §7 : l'intersection
+```
+
+```python
+# claims.py — contrat B0, gelé
+class IdToken(BaseModel):
+    iss: str; sub: UUID; aud: str; exp: int; iat: int; auth_time: int
+    nonce: str; acr: str; amr: list[str]; sid: UUID
+    name: str; given_name: str; family_name: str; role: Role
+```
+
+```python
+# errors.py — les trois façons de répondre une erreur OAuth
+class OAuthError(Exception):                     # /token : 400 {"error": "invalid_grant"} (RFC 6749 §5.2)
+    def __init__(self, error: str):
+        self.error = error
+
+async def oauth_error_handler(request, exc: OAuthError):   # branché dans main.py
+    return JSONResponse({"error": exc.error}, status_code=400)
+
+def redirect_error(redirect_uri: str, error: str, state: str | None) -> RedirectResponse:
+    # /authorize, APRÈS validation du redirect_uri seulement
+    return RedirectResponse(f"{redirect_uri}?{urlencode({'error': error, 'state': state or ''})}", 302)
+
+def error_page(error: str) -> HTMLResponse:
+    # /authorize, AVANT : client ou redirect_uri inconnu → jamais de redirection
+    return HTMLResponse(f"<h1>Erreur : {html.escape(error)}</h1>", status_code=400)
+```
+
+*Pourquoi un modèle Pydantic pour un jeton qu'on émet :* `IdToken(**data)`
+refuse de construire un jeton auquel il manque un claim. Impossible d'émettre
+un ID token sans `nonce` par oubli.
+
+**Quel jeton, exactement ?** Un login OIDC produit quatre jetons, et un seul
+d'entre eux est `IdToken` :
+
+| Jeton | Format | Pour qui | Contient |
+| --- | --- | --- | --- |
+| Code d'autorisation | opaque (aléatoire), stocké **haché** dans `authorization_codes` | le client, pour 60 s | rien : c'est un ticket à échanger sur `/token` |
+| **ID token** (`IdToken`) | **JWT** signé RS256 | l'application cliente (`aud` = `client_id`) | *qui* s'est connecté, *quand*, *comment* |
+| Access token | JWT signé RS256 | les Resource Servers (`aud` = `svc-impots`…) | les scopes accordés |
+| Refresh token | opaque, stocké haché dans `refresh_tokens` | le client, 30 jours | rien : un ticket pour un nouveau couple de jetons |
+
+Le code d'autorisation, le « premier » jeton, n'a donc pas de claims et pas de
+modèle Pydantic. `IdToken` décrit le JWT émis par `/token` en échange de ce
+code.
+
+**Pourquoi les claims ne s'appellent pas comme les colonnes.** `IdToken`
+n'est pas une copie de la table `users` : c'est un format **imposé par la
+spec** ([OIDC Core §5.1](https://openid.net/specs/openid-connect-core-1_0.html#StandardClaims)),
+que toute bibliothèque OIDC côté client sait lire (`sub`, `given_name`,
+`family_name`, pas `id`, `prenom`, `nom`). La traduction modèle → claims se
+fait à un seul endroit, `id_claims(row)` dans `oidc/token.py` :
+
+| Claim | Vient de |
+| --- | --- |
+| `iss` | `settings.issuer` |
+| `sub` | `User.id` : un UUID stable, **jamais** le `numero_fiscal` |
+| `aud` | `OAuthAuthorizationCodes.client_id` |
+| `exp`, `iat` | calculés à l'émission (`iat` = maintenant, `exp` = `iat + settings.id_token_ttl`) |
+| `auth_time`, `acr`, `amr`, `nonce` | `OAuthAuthorizationCodes`, recopiés depuis `/authorize` et la session |
+| `sid` | `OAuthAuthorizationCodes.session_id` |
+| `name` | `f"{User.prenom} {User.nom}"` |
+| `given_name` | `User.prenom` |
+| `family_name` | `User.nom` |
+| `role` | `User.role`, un claim à nous |
+
+Seuls cinq claims viennent de `User` ; les autres décrivent *l'événement de
+connexion*. Et ce qui n'y est **pas** compte autant : `numero_fiscal`,
+`email`, `password_hash`, `status`. Un JWT est lisible par quiconque le
+détient (il est signé, pas chiffré), donc la séparation modèle / jeton est
+aussi une frontière de confidentialité.
+
+- Codes d'erreur : [RFC 6749 §4.1.2.1](https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1) et [§5.2](https://datatracker.ietf.org/doc/html/rfc6749#section-5.2).
+- Spécifié par [ADR §7](adr/0002-stack-simplifiee.md#7-modèle-didentité-et-parcours-dauthentification), [arch §9](architecture.md#9-rôles-et-scopes).
+
+### `src/security/` — primitives de protection partagées
+
+**Le problème.** Hacher un mot de passe, limiter les tentatives, (plus tard) vérifier un
+Bearer : plusieurs fonctionnalités en ont besoin (`flows/`, `users/`,
+`oidc/`…) et aucune n'en est propriétaire. Elles vivent donc ici, et chaque
+fonctionnalité les importe.
+
+#### `passwords.py`
 
 ```python
 import asyncio, hashlib
@@ -602,6 +852,8 @@ async def verify_password(hash_: str, pwd: str) -> bool:
 
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+DUMMY_HASH = ph.hash("dummy")   # vérifié quand le compte n'existe pas (flows/) : même durée de réponse
 ```
 
 *Pourquoi Argon2 pour les mots de passe :* un mot de passe a peu d'entropie ;
@@ -617,15 +869,153 @@ thread, seule celle-ci attend ([M4](#m4--python-async-fastapi-pydantic)).
 
 - <https://argon2-cffi.readthedocs.io/en/stable/api.html>
 
-#### `external/directory.py`
+#### `ratelimit.py`
 
-Le `Protocol` `UserDirectory` et `DirectoryUser` sont **écrits dans
-[ADR §6](adr/0002-stack-simplifiee.md#le-port-reste-le-même)** : les recopier.
-`JsonDirectory` charge `fixtures/users.json` une fois et l'indexe par
-`numero_fiscal`. Aucune méthode d'écriture : l'annuaire est en lecture seule
-*par construction*.
+```python
+async def hit(s: AsyncSession, bucket: str, limit: int, window: timedelta) -> bool:
+    try:
+        count = await s.scalar(text("""
+            INSERT INTO rate_limits (bucket, count, expires_at) VALUES (:b, 1, :exp)
+            ON CONFLICT (bucket) DO UPDATE SET
+                count      = CASE WHEN rate_limits.expires_at < now() THEN 1    ELSE rate_limits.count + 1 END,
+                expires_at = CASE WHEN rate_limits.expires_at < now() THEN :exp ELSE rate_limits.expires_at END
+            RETURNING count"""), {"b": bucket, "exp": datetime.now(UTC) + window})
+        return count <= limit
+    except Exception:
+        return False          # échoue FERMÉ : base indisponible = on refuse
+```
 
-#### `external/mailer.py`
+*Pourquoi pas de `Protocol` ici :* le compteur reste dans Postgres
+([ADR §3](adr/0002-stack-simplifiee.md#3-valkey--la-question-tranchée)).
+Une seule implémentation → une fonction, comme les `queries.py`.
+
+*Pourquoi `ON CONFLICT` :* c'est un « insère ou incrémente » **atomique** en une
+requête. Deux requêtes concurrentes ne peuvent pas perdre un incrément. Un
+`SELECT` puis `UPDATE` en deux temps le pourrait.
+*Pourquoi les `CASE` :* une fenêtre expirée repart à 1 avec une nouvelle
+échéance. Sans ça le compteur ne redescend jamais : un compte bloqué l'est
+pour toujours. Tout reste dans la même requête atomique. Les lignes expirées
+ne sont jamais supprimées — sans gravité, une ligne par bucket, réutilisée ;
+un `DELETE FROM rate_limits WHERE expires_at < now()` périodique suffira si
+la table grossit.
+*Pourquoi échouer fermé :* si le compteur est en panne, échouer ouvert
+supprime la protection anti-brute-force précisément au moment où quelque chose
+ne va pas ([ADR §16](adr/0002-stack-simplifiee.md#16-checklist-sécurité)).
+
+- <https://www.postgresql.org/docs/16/sql-insert.html#SQL-ON-CONFLICT>
+
+Concepts : [M4](#m4--python-async-fastapi-pydantic), [M5](#m5--postgres-sqlalchemy-20-alembic), [M6](#m6--mots-de-passe-et-credentials).
+
+### `src/external/` — les systèmes extérieurs qui ne sont pas notre base
+
+**Le problème.** Le code métier doit pouvoir dire « trouve cet utilisateur
+dans l'annuaire » ou « envoie ce mail » sans savoir *comment*. Parce que le
+*comment* va changer : le JSON deviendra un LDAP, la console deviendra un
+SMTP. Si le code métier connaît l'implémentation, chaque changement le
+traverse.
+
+**L'outil.** Un `typing.Protocol` par port. Un `Protocol` décrit une forme
+(« un objet qui a une méthode `send(to, subject, body)` ») sans héritage :
+n'importe quelle classe qui a cette méthode *est* un `Mailer`. Le code métier
+reçoit un `Mailer` par injection de dépendance FastAPI (`Depends`) et ne sait
+pas lequel.
+
+**Comment on s'en sert ici.** Un fichier par port, chaque fichier = le
+`Protocol` + son implémentation unique d'aujourd'hui.
+
+#### `directory.py`
+
+**Le problème.** Les utilisateurs viennent de l'annuaire du client — un
+fichier JSON aujourd'hui, un LDAP demain — et on n'y écrit jamais. Le serveur
+en attend trois choses : retrouver une personne par numéro fiscal, lister
+tout le monde (pour le seed), et traduire ses groupes d'annuaire en rôle chez
+nous.
+
+**Le fichier complet.**
+
+```python
+import json
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Protocol
+
+from pydantic import BaseModel, EmailStr
+
+from authentint.infra.models.identity import Role
+
+
+class DirectoryUser(BaseModel):
+    external_id: str          # clé de jointure stable (entryUUID côté LDAP)
+    numero_fiscal: str
+    nom: str
+    prenom: str
+    email: EmailStr           # nécessite pydantic[email]
+    groups: list[str]         # DN bruts, ex. "cn=agents,ou=groupes,dc=dgfip,dc=local"
+
+
+class UserDirectory(Protocol):
+    """Vue en lecture seule de l'annuaire du client. Aucune méthode d'écriture."""
+    async def find_by_numero_fiscal(self, nf: str) -> DirectoryUser | None: ...
+    def list_all(self) -> Iterator[DirectoryUser]: ...
+
+
+class JsonDirectory:
+    def __init__(self, path: str):
+        users = [DirectoryUser(**u) for u in json.loads(Path(path).read_text())]
+        self._by_nf = {u.numero_fiscal: u for u in users}
+        assert len(self._by_nf) == len(users), "numero_fiscal en double dans l'annuaire"
+
+    async def find_by_numero_fiscal(self, nf: str) -> DirectoryUser | None:
+        return self._by_nf.get(nf)
+
+    def list_all(self) -> Iterator[DirectoryUser]:
+        return iter(self._by_nf.values())
+
+
+ROLE_BY_GROUP = {"cn=admins": Role.admin, "cn=agents": Role.agent, "cn=contribuables": Role.contribuable}
+
+def role_for(groups: list[str]) -> Role:
+    roles = {ROLE_BY_GROUP.get(dn.split(",")[0].lower()) for dn in groups}
+    for role in (Role.admin, Role.agent):   # plusieurs groupes : le plus élevé gagne
+        if role in roles:
+            return role
+    return Role.contribuable                # aucun groupe connu : le moindre privilège
+```
+
+*Pourquoi tout valider au chargement :* une entrée invalide (mail faux, champ
+manquant, `groups` absent) fait échouer le seed **au démarrage, bruyamment**,
+au lieu de remplir la table à moitié. Les 10 006 entrées de la fixture se
+valident en moins d'une seconde.
+*Pourquoi un `dict` indexé par `numero_fiscal` :* c'est l'identifiant de
+login, la recherche est en O(1). L'`assert` attrape les doublons, qu'un `dict`
+écraserait en silence.
+*Pourquoi `find_by_numero_fiscal` est `async` et pas `list_all` :* c'est le
+contrat de l'ADR. En LDAP, une recherche est un appel réseau ; `list_all` ne
+sert qu'au script de seed.
+*Pourquoi `role_for` est ici :* le format des DN appartient à l'annuaire ; la
+même fonction reste valable derrière `LdapDirectory`. Utilisée par
+[`scripts/seed.py`](#scriptsseedpy) (`role=role_for(du.groups)`).
+*Pourquoi `contribuable` par défaut :* le moindre privilège. On n'accorde
+jamais plus que ce que l'annuaire prouve.
+*Pourquoi aucune méthode d'écriture :* la lecture seule vient de la *forme*
+de l'interface — il n'existe pas de méthode pour écrire, donc on ne peut pas
+écrire par accident.
+
+Le test d'abord, sans base (`tests/unit/test_directory.py`) :
+
+```python
+def test_role_for():
+    assert role_for(["cn=admins,ou=groupes,dc=dgfip,dc=local",
+                     "cn=agents,ou=groupes,dc=dgfip,dc=local"]) is Role.admin
+    assert role_for([]) is Role.contribuable
+    assert role_for(["cn=inconnu,ou=groupes,dc=dgfip,dc=local"]) is Role.contribuable
+```
+
+- Spécifié par [ADR §6](adr/0002-stack-simplifiee.md#le-port-reste-le-même).
+- `typing.Protocol` : <https://docs.python.org/3/library/typing.html#typing.Protocol>
+- `EmailStr` : <https://docs.pydantic.dev/latest/api/networks/#pydantic.networks.EmailStr>
+
+#### `mailer.py`
 
 ```python
 class Mailer(Protocol):
@@ -636,114 +1026,29 @@ class ConsoleMailer:
         log.info("mail", extra={"to": to, "subject": subject, "body": body})
 ```
 
+`log = logging.getLogger(__name__)` — les logs JSON arrivent avec `audit/`.
+
 Le lien d'activation apparaît dans `docker compose logs auth-server`. C'est
 tout ce qu'il faut pour développer et démontrer.
 
-#### `keys/keystore.py`
+#### `fixtures/ldap/users.json`
 
-**Le problème.** Il faut une clé privée RSA pour signer, la clé publique
-correspondante publiée dans le JWKS, et pouvoir en changer sans casser les
-jetons en circulation ([ADR §12](adr/0002-stack-simplifiee.md#12-rotation-des-clés--sans-cronjob)).
+**Le problème.** Pas de LDAP à installer, mais il faut des utilisateurs.
 
-```python
-from joserfc.jwk import RSAKey
-from cryptography.fernet import Fernet
+**Comment on s'en sert ici.** Le format est dans
+[ADR §6](adr/0002-stack-simplifiee.md#6-source-des-utilisateurs--json-au-lieu-de-ldap).
+En tête, six comptes écrits à la main pour les démos et les tests : un
+`admin` (Claire Marchand), deux `agent`, trois `contribuable` — dont un qu'on
+retirera du fichier pour tester le passage en `disabled` au second seed.
+Ensuite, 10 000 `contribuable` générés (numéros fiscaux commençant par `3`,
+mails `prenom.nom.N@contribuable.example`) : de quoi tester la pagination de
+`/admin/users`, la durée du seed et la charge (k6). Données inventées —
+numéros fiscaux à 13 chiffres qui ne correspondent à personne, domaines en
+`.example` (réservé, jamais routé). Lu uniquement par `JsonDirectory`.
 
-fernet = Fernet(settings.key_encryption_key)
-
-def generate(kid: str) -> tuple[dict, bytes]:
-    key = RSAKey.generate_key(2048, parameters={"kid": kid, "use": "sig", "alg": "RS256"})
-    public_jwk = key.as_dict(private=False)                 # va dans signing_keys.public_jwk, publié tel quel
-    private_pem = key.as_pem(private=True)                  # jamais publié, jamais loggé
-    return public_jwk, fernet.encrypt(private_pem)          # chiffré au repos
-
-async def ensure_active_key(s: AsyncSession) -> None:
-    await s.execute(text("SELECT pg_advisory_xact_lock(1)"))   # un seul réplica passe ici à la fois
-    if await s.scalar(select(SigningKey).where(SigningKey.status == "active")) is None:
-        …insert(generate(new_kid()), status="active")…
-    await s.commit()
-
-async def jwks(s) -> dict:
-    rows = await s.scalars(select(SigningKey).where(SigningKey.status.in_(("next", "active", "retired"))))
-    return {"keys": [r.public_jwk for r in rows]}           # les trois statuts sont publiés
-```
-
-*Pourquoi l'advisory lock :* trois réplicas démarrent en même temps, chacun
-voit « pas de clé active », chacun en génère une → un jeton sur trois est
-signé par une clé que les autres ne connaissent pas. Le verrou Postgres
-sérialise ce bloc entre tous les processus. C'est le bug que `--scale 3`
-attrape.
-*Pourquoi chiffrer le PEM :* si un dump de la base fuit, la clé privée doit
-être inutilisable sans `KEY_ENCRYPTION_KEY`, qui n'est pas dans la base.
-
-- `joserfc.jwk` : <https://jose.authlib.org/en/guide/jwk/>
-- Advisory locks : <https://www.postgresql.org/docs/16/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS>
-- Fernet : <https://cryptography.io/en/latest/fernet/>
-
-#### `security/ratelimit.py`
-
-```python
-class RateLimiter(Protocol):
-    async def hit(self, bucket: str, limit: int, window: timedelta) -> bool: ...
-
-class PostgresRateLimiter:
-    async def hit(self, bucket, limit, window) -> bool:
-        try:
-            count = await self.s.scalar(text("""
-                INSERT INTO rate_limits (bucket, count, expires_at) VALUES (:b, 1, :exp)
-                ON CONFLICT (bucket) DO UPDATE SET count = rate_limits.count + 1
-                RETURNING count"""), {"b": bucket, "exp": now() + window})
-            return count <= limit
-        except Exception:
-            return False          # échoue FERMÉ : base indisponible = on refuse
-```
-
-*Pourquoi `ON CONFLICT` :* c'est un « insère ou incrémente » **atomique** en une
-requête. Deux requêtes concurrentes ne peuvent pas perdre un incrément. Un
-`SELECT` puis `UPDATE` en deux temps le pourrait.
-*Pourquoi échouer fermé :* si le compteur est en panne, échouer ouvert
-supprime la protection anti-brute-force précisément au moment où quelque chose
-ne va pas ([ADR §16](adr/0002-stack-simplifiee.md#16-checklist-sécurité)).
-
-- <https://www.postgresql.org/docs/16/sql-insert.html#SQL-ON-CONFLICT>
-
-Concepts : [M4](#m4--python-async-fastapi-pydantic), [M5](#m5--postgres-sqlalchemy-20-alembic), [M6](#m6--mots-de-passe-et-credentials).
-
-### `src/domain/` — pur, sans I/O
-
-**Le problème.** Le calcul des scopes accordés, la forme des claims, les codes
-d'erreur OAuth : ce sont des règles. Elles doivent être testables en une
-milliseconde, sans base ni réseau, et lisibles par quelqu'un qui relit la
-sécurité.
-
-**Comment on s'en sert ici.** Des modèles Pydantic et des fonctions pures.
-
-```python
-# scopes.py
-ALLOWED: dict[Role, frozenset[str]] = {
-    Role.admin: frozenset({"svc:admin.users", "svc:admin.audit", "svc:impots.read", …}),
-    Role.agent: frozenset({"svc:impots.read", "svc:impots.write", "svc:cadastre.read"}),
-    Role.contribuable: frozenset({"svc:impots.read"}),
-}
-
-def grant(requested: set[str], role: Role, client: Client) -> set[str]:
-    return requested & ALLOWED[role] & set(client.allowed_scopes)   # ADR §7 : l'intersection
-```
-
-```python
-# claims.py — contrat B0, gelé
-class IdToken(BaseModel):
-    iss: str; sub: UUID; aud: str; exp: int; iat: int; auth_time: int
-    nonce: str; acr: str; amr: list[str]; sid: UUID
-    name: str; given_name: str; family_name: str; role: Role
-```
-
-*Pourquoi un modèle Pydantic pour un jeton qu'on émet :* `IdToken(**data)`
-refuse de construire un jeton auquel il manque un claim. Impossible d'émettre
-un ID token sans `nonce` par oubli.
-
-- Codes d'erreur : [RFC 6749 §4.1.2.1](https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1) et [§5.2](https://datatracker.ietf.org/doc/html/rfc6749#section-5.2).
-- Spécifié par [ADR §7](adr/0002-stack-simplifiee.md#7-modèle-didentité-et-parcours-dauthentification), [arch §9](architecture.md#9-rôles-et-scopes).
+Le fichier est hors de `apps/auth-server/` : le compose doit le monter dans
+le conteneur (`volumes: ["./fixtures:/fixtures:ro"]` sur `auth-server`),
+c'est le chemin que lit `settings.fixtures_path`.
 
 ### `src/audit/`
 
@@ -760,12 +1065,13 @@ FORBIDDEN = {"password", "numero_fiscal", "token", "code", "secret"}
 
 async def emit(s: AsyncSession, event_type: str, *, actor: UUID | None, outcome: str, detail: dict):
     assert not FORBIDDEN & detail.keys(), "secret dans un événement d'audit"
-    s.add(AuditEvent(event_type=event_type, actor_user_id=actor, outcome=outcome,
-                     detail=detail, request_id=request_id_var.get()))
+    s.add(AuditEvents(occurred_at=datetime.now(UTC), event_type=event_type, actor_user_id=actor,
+                      actor_ip=client_ip_var.get(), outcome=outcome, detail=detail,
+                      request_id=request_id_var.get()))
 ```
 
 Le `request_id` vient d'un middleware qui lit l'en-tête `X-Request-Id` posé
-par Caddy et le range dans un `ContextVar` — une variable dont la valeur est
+par Caddy (et l'IP du client, dans `client_ip_var`) et le range dans un `ContextVar` — une variable dont la valeur est
 propre à la requête en cours, même en `async`. Le formateur de logs JSON lit
 le même `ContextVar`. Résultat : `grep <request_id>` dans les logs de Caddy,
 d'`auth-server` et dans `audit_events` raconte la même requête.
@@ -778,62 +1084,300 @@ effacer une trace.
 - Logs JSON avec la stdlib : <https://docs.python.org/3/howto/logging-cookbook.html#implementing-structured-logging>
 - `ContextVar` : <https://docs.python.org/3/library/contextvars.html>
 - Middleware : <https://fastapi.tiangolo.com/tutorial/middleware/>
+
+Trois fichiers : `emit.py` (ci-dessus), `middleware.py` (le `ContextVar` et le
+`RequestIdMiddleware`) et `routes.py` (`/admin/audit` pour les admins,
+`/me/audit` pour son propre historique). Les deux routes exigent un Bearer :
+les écrire à l'étape [`bearer.py`](#srcsecuritybearerpy), le reste maintenant.
+
 - Spécifié par [ADR §8](adr/0002-stack-simplifiee.md#sessions-audit-limitation-de-débit).
 
-### `src/flows/` — brick B1
+### `src/keys/` — les clés de signature
 
-**Le problème.** Quand `/authorize` ne trouve pas de session, il redirige vers
-le frontend avec un `uid`. Le frontend doit demander « qu'est-ce qu'il manque
-pour authentifier cette personne ? », afficher l'étape (mot de passe,
-consentement, demain un OTP), envoyer la réponse, et recommencer. **Le serveur
-décide de l'étape**, jamais le client — sinon un client malveillant « saute »
-une étape.
-
-**Comment on s'en sert ici.**
-
-```python
-def next_step(it: Interaction, client: Client, has_consent: bool) -> str | None:
-    if it.user_id is None:        return "password"
-    # ici viendra : if it.needs_otp: return "otp"        ← le seam MFA (ADR §2)
-    if client.require_consent and not has_consent:  return "consent"
-    return None                                     # terminé → émettre le code
-
-@router.get("/interaction/{uid}")
-async def get_interaction(uid: str, s = Depends(get_session)):
-    it = await load_interaction(s, uid)             # 404 si inconnu ou expiré
-    return {"prompt": next_step(it, …), "client_name": it.client.name, "scopes": it.scope.split()}
-
-@router.post("/interaction/{uid}/login")
-async def login(uid: str, body: LoginBody, request: Request, response: Response, s = Depends(get_session)):
-    if not await limiter.hit(f"login:ip:{request.client.host}", 10, timedelta(minutes=1)):
-        raise HTTPException(429)
-    user = await users.by_numero_fiscal(s, body.numero_fiscal)
-    ok = await verify_password(user.password_hash if user else DUMMY_HASH, body.password)   # temps constant
-    if not user or not ok:
-        await audit.emit(s, "login.failure", actor=None, outcome="failure", detail={"reason": "bad_credentials"})
-        raise HTTPException(401)
-    session = await sessions.create(s, user, request)
-    response.set_cookie("__Host-session", str(session.id), httponly=True, secure=True, samesite="lax", path="/")
-    it.user_id = user.id
-    return {"prompt": next_step(it, …)}
+```
+keys/
+├── keystore.py   ensure_active_key · rotate · jwks · active
+└── routes.py     POST /admin/keys/rotate   (étape suivante, après bearer.py)
 ```
 
-*Pourquoi `DUMMY_HASH` :* si on ne hache que quand l'utilisateur existe, la
-réponse est 100 ms plus rapide pour un compte inconnu — un attaquant mesure et
-énumère les numéros fiscaux valides. On paie toujours le hash.
-*Pourquoi `__Host-` :* le préfixe force le navigateur à n'accepter le cookie
-que sur HTTPS, sans attribut `Domain`, sur `Path=/` — il ne peut pas être posé
-par un sous-domaine ni fuir vers un autre ([M3](#m3--http-cookies-cors-csp)).
+#### `keystore.py`
 
-`activation.py` et `reset.py` suivent le même schéma : `request` génère un
-jeton aléatoire, en stocke le **hash**, envoie le lien par le `Mailer`, et
-répond `202` **que le compte existe ou non** ; `confirm` retrouve le jeton par
-son hash, vérifie `expires_at` et `consumed_at`, pose le mot de passe.
+**Le problème.** Il faut une clé privée RSA pour signer, la clé publique
+correspondante publiée dans le JWKS, et pouvoir en changer sans casser les
+jetons en circulation ([ADR §12](adr/0002-stack-simplifiee.md#12-rotation-des-clés--sans-cronjob)).
 
-- Cookies avec FastAPI : <https://fastapi.tiangolo.com/advanced/response-cookies/>
-- Spécifié par [ADR §9 — interaction](adr/0002-stack-simplifiee.md#api-dinteraction--la-nôtre-consommée-par-le-frontend), [§9 — compte](adr/0002-stack-simplifiee.md#cycle-de-vie-du-compte), [arch §4](architecture.md#4-le-parcours-dauthentification).
+```python
+import secrets
+from datetime import UTC, datetime, timedelta
 
-Concepts : [M3](#m3--http-cookies-cors-csp), [M6](#m6--mots-de-passe-et-credentials).
+from cryptography.fernet import Fernet
+from joserfc.jwk import RSAKey
+from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from authentint.config import settings
+from authentint.infra.models.keys import KeyStatus, SigningKeys
+
+fernet = Fernet(settings.key_encryption_key)
+FAR_FUTURE = datetime(9999, 1, 1, tzinfo=UTC)   # next / active : pas d'échéance tant qu'elles peuvent signer
+
+def _new_key(status: KeyStatus) -> SigningKeys:
+    kid = secrets.token_urlsafe(8)
+    key = RSAKey.generate_key(2048, parameters={"kid": kid, "use": "sig", "alg": "RS256"})
+    return SigningKeys(
+        kid=kid, alg="RS256", status=status,
+        public_jwk=key.as_dict(private=False),                                    # publié tel quel
+        private_pem_encrypted=fernet.encrypt(key.as_pem(private=True)).decode(),  # chiffré au repos ; bytes → str
+        not_before=datetime.now(UTC), not_after=FAR_FUTURE,
+    )
+
+async def _lock(s: AsyncSession) -> None:
+    await s.execute(text("SELECT pg_advisory_xact_lock(1)"))   # un seul réplica à la fois, jusqu'au commit
+
+async def _by_status(s: AsyncSession, status: KeyStatus) -> SigningKeys | None:
+    return await s.scalar(select(SigningKeys).where(SigningKeys.status == status))
+
+async def ensure_active_key(s: AsyncSession) -> None:
+    await _lock(s)
+    if await _by_status(s, KeyStatus.active) is None:
+        s.add_all([_new_key(KeyStatus.active), _new_key(KeyStatus.next)])
+    await s.commit()
+
+async def rotate(s: AsyncSession) -> None:
+    await _lock(s)
+    old, new = await _by_status(s, KeyStatus.active), await _by_status(s, KeyStatus.next)
+    old.status = KeyStatus.retired
+    old.not_after = datetime.now(UTC) + timedelta(seconds=max(settings.access_token_ttl, settings.id_token_ttl))
+    new.status = KeyStatus.active                               # déjà publiée depuis la rotation précédente
+    s.add(_new_key(KeyStatus.next))
+    await s.commit()
+
+async def jwks(s: AsyncSession) -> dict:
+    rows = await s.scalars(select(SigningKeys).where(SigningKeys.not_after > func.now()))
+    return {"keys": [r.public_jwk for r in rows]}               # next + active + retired encore utiles
+
+async def active(s: AsyncSession) -> RSAKey:
+    row = await _by_status(s, KeyStatus.active)
+    pem = fernet.decrypt(row.private_pem_encrypted.encode())    # InvalidToken si la clé ou la donnée est fausse
+    return RSAKey.import_key(pem, parameters={"kid": row.kid})
+```
+
+*Pourquoi `jwks()` filtre sur `not_after` et pas sur `status` :* le statut dit
+*qui signe* ; `not_after` dit *qui sert encore*. Une clé `retired` disparaît
+seule du JWKS quand le dernier jeton qu'elle a signé a expiré — sans ça, le
+JWKS grossit à chaque rotation.
+*Pourquoi `max(access_token_ttl, id_token_ttl)` :* c'est la durée de vie
+maximale d'un jeton signé par l'ancienne clé. Les refresh tokens sont opaques
+(pas signés) : ils ne comptent pas.
+*Pourquoi créer `next` dès le premier démarrage :* une clé doit être publiée
+*avant* de signer, sinon un service qui a mis le JWKS en cache juste avant la
+rotation rejette les premiers jetons neufs. À chaque rotation, la nouvelle
+`active` est déjà dans le JWKS depuis un cycle complet
+([ADR §12](adr/0002-stack-simplifiee.md#12-rotation-des-clés--sans-cronjob)).
+*Pourquoi `.decode()` / `.encode()` :* Fernet travaille en `bytes`, la colonne
+est du `text`.
+
+**Le cycle d'une clé.** Deux durées à ne pas confondre : la durée de vie d'un
+*jeton* (`access_token_ttl`, 10 min) et la durée de publication d'une *clé*.
+Une clé qui signe ou signera reste publiée sans échéance (`FAR_FUTURE`) ; seul
+le passage en `retired` lance le compte à rebours. Mettre le TTL d'un jeton sur
+une clé `next` ou `active` la ferait sortir du JWKS pendant qu'elle signe
+encore — et plus aucun jeton neuf ne serait vérifiable.
+
+```mermaid
+---
+config:
+  look: handDrawn
+  theme: neutral
+---
+stateDiagram-v2
+    direction LR
+    [*] --> next: ensure_active_key() / rotate()
+    next --> active: rotate()
+    active --> retired: rotate()
+    retired --> [*]: not_after dépassé
+
+    note right of next
+        publiée · ne signe pas
+        not_after = FAR_FUTURE
+    end note
+    note right of active
+        publiée · signe les nouveaux jetons
+        not_after = FAR_FUTURE
+    end note
+    note right of retired
+        publiée · ne signe plus
+        not_after = now + max(TTL jetons)
+    end note
+```
+
+La même rotation, vue par un service qui vérifie les jetons :
+
+```mermaid
+---
+config:
+  look: handDrawn
+  theme: neutral
+---
+sequenceDiagram
+    participant A as auth-server (keystore)
+    participant DB as signing_keys
+    participant S as svc-impots
+
+    A->>DB: démarrage : ensure_active_key() → K1 active, K2 next
+    S->>A: GET /.well-known/jwks.json
+    A-->>S: [K1, K2] (mis en cache)
+    A->>A: /token signe T1 avec active() = K1
+    Note over A,DB: POST /admin/keys/rotate
+    A->>DB: K1 → retired (not_after = +10 min), K2 → active, K3 → next
+    A->>A: /token signe T2 avec K2
+    S->>S: vérifie T2 : K2 déjà dans le cache ✓
+    S->>S: vérifie T1 : K1 encore dans le cache ✓
+    Note over A,S: 10 min plus tard : JWKS = [K2, K3] — T1 a expiré de toute façon
+```
+*Pourquoi l'advisory lock :* trois réplicas démarrent en même temps, chacun
+voit « pas de clé active », chacun en génère une → un jeton sur trois est
+signé par une clé que les autres ne connaissent pas. Le verrou Postgres
+sérialise ce bloc entre tous les processus. C'est le bug que `--scale 3`
+attrape.
+*Pourquoi chiffrer le PEM :* si un dump de la base fuit, la clé privée doit
+être inutilisable sans `KEY_ENCRYPTION_KEY`, qui n'est pas dans la base.
+
+- `joserfc.jwk` : <https://jose.authlib.org/en/guide/jwk/>
+- Advisory locks : <https://www.postgresql.org/docs/16/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS>
+- Fernet : <https://cryptography.io/en/latest/fernet/>
+
+### `src/security/bearer.py`
+
+**Le problème.** Les routes `/admin/*` et `/me/*`, ainsi que `/userinfo`,
+sont protégées par un Bearer. Elles doivent le vérifier **exactement comme un
+Resource Server** : c'est le même problème, donc le même code.
+
+```python
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from joserfc import jwt
+from joserfc.jwk import KeySet
+from joserfc.errors import JoseError
+
+bearer = HTTPBearer()
+
+async def verify_access_token(s: AsyncSession, token: str) -> dict:
+    try:
+        tok = jwt.decode(token, KeySet.import_key_set(await keystore.jwks(s)), algorithms=["RS256"])
+        jwt.JWTClaimsRegistry(iss={"essential": True, "value": settings.issuer},
+                              exp={"essential": True}).validate(tok.claims)
+        # aud : l'audience de l'API admin/me n'est pas fixée par l'ADR — la choisir et l'y écrire
+    except JoseError:
+        raise HTTPException(401, "invalid_token")
+    return tok.claims
+
+def require_scope(scope: str):
+    async def dep(cred: HTTPAuthorizationCredentials = Depends(bearer), s = Depends(get_session)) -> dict:
+        claims = await verify_access_token(s, cred.credentials)   # 401 si signature/iss/aud/exp faux
+        if scope not in claims["scope"].split():
+            raise HTTPException(403, "insufficient_scope")
+        return claims
+    return dep
+```
+
+Puis dans n'importe quel `routes.py` :
+`@router.get("/admin/users", dependencies=[Depends(require_scope("svc:admin.users"))])`.
+
+`require_scope("…")` est une *fabrique de dépendance* : elle renvoie une
+fonction que FastAPI appelle avant la route. C'est le motif standard pour
+« cette route exige X ».
+
+- `HTTPBearer` : <https://fastapi.tiangolo.com/reference/security/#fastapi.security.HTTPBearer>
+
+Première route protégée — `keys/routes.py` :
+
+```python
+@router.post("/admin/keys/rotate", dependencies=[Depends(require_scope("svc:admin.users"))])
+async def rotate(s = Depends(get_session)):
+    await keystore.rotate(s)         # next→active→retired, nouvelle next
+    await audit.emit(s, "keys.rotated", …)
+```
+
+La rotation remplace le CronJob ([ADR §12](adr/0002-stack-simplifiee.md#12-rotation-des-clés--sans-cronjob)) :
+elle se déclenche à la main, pour pouvoir la *démontrer*.
+
+Maintenant que `require_scope` existe, écrire aussi `audit/routes.py`.
+
+### `users/` · `clients/` · `sessions/` — une fonctionnalité, un dossier
+
+**Le problème.** `flows/` doit retrouver un utilisateur par numéro fiscal,
+`oidc/` doit charger un client, les deux touchent aux sessions, et les écrans
+`/me` et `/admin` gèrent ces trois mêmes objets. Il faut un endroit pour les
+requêtes SQL de chacun, et pour ses routes de gestion.
+
+**Comment on s'en sert ici.** Chaque dossier contient deux fichiers :
+`queries.py` (des fonctions qui reçoivent une `AsyncSession`, pas de classe)
+et `routes.py` (un `APIRouter`). Une autre fonctionnalité peut importer le
+`queries.py` d'une fonctionnalité, jamais ses routes.
+
+```
+users/
+├── queries.py    by_id · by_numero_fiscal · create · set_password · lock · unlock
+└── routes.py     /me · /me/password · /admin/users (+ /{id}/lock · /unlock)
+                  (/resend-activation : ajoutée avec flows/activation.py)
+clients/
+├── queries.py    get · list_all · create · update · delete
+└── routes.py     /admin/clients
+sessions/
+├── queries.py    create(s, user, request) · from_cookie(s, request) · list_for_user · revoke
+└── routes.py     /me/sessions · DELETE /me/sessions/{id} · /admin/sessions
+```
+
+```python
+# sessions/queries.py
+async def from_cookie(s: AsyncSession, request: Request) -> Sessions | None:
+    sid = request.cookies.get("__Host-session")
+    if sid is None:
+        return None
+    return await s.scalar(select(Sessions).where(Sessions.id == sid,
+                                                 Sessions.revoked_at.is_(None),
+                                                 Sessions.expires_at > func.now()))
+```
+
+L'admin n'a pas de dossier à lui : une route admin vit dans la fonctionnalité
+qu'elle gère, et c'est `require_scope("svc:admin.*")`
+([§bearer.py](#srcsecuritybearerpy)) qui la rend réservée aux admins.
+
+- Spécifié par [ADR §9 — self-service et admin](adr/0002-stack-simplifiee.md#9-endpoints).
+- Pagination et filtres typés pour `/admin/audit` : <https://fastapi.tiangolo.com/tutorial/query-params-str-validations/>
+
+### `scripts/seed.py`
+
+**Le problème.** La base démarre vide ; le brief dit « base existante avec des
+utilisateurs déjà créés ». Il faut la remplir depuis l'annuaire (le JSON), et
+le refaire sans risque à chaque changement de fixtures.
+
+```python
+async def main():
+    async with Session() as s:
+        for du in JsonDirectory(settings.fixtures_path).list_all():   # le fichier monté par le compose
+            await s.execute(insert(User).values(external_id=du.external_id, …, role=role_for(du.groups), status="pending_activation")
+                            .on_conflict_do_update(index_elements=["external_id"], set_={"nom": du.nom, …}))
+        for c in CLIENTS:                                  # sans client, /authorize ne peut rien faire
+            await s.execute(insert(OAuthClients).values(**c).on_conflict_do_update(index_elements=["id"], set_=c))
+        await s.commit()
+
+CLIENTS = [{"id": "portail-web", "name": "Portail", "type": "public", "secret_hash": None,
+            "redirect_uris": ["https://app.authentint.localhost/callback"],    # à aligner avec le routeur du frontend
+            "post_logout_redirect_uris": ["https://app.authentint.localhost/"],
+            "allowed_grants": ["authorization_code", "refresh_token"],
+            "allowed_scopes": ["openid", "offline_access", "svc:impots.read", "svc:impots.write",
+                               "svc:cadastre.read", "svc:cadastre.write", "svc:admin.users", "svc:admin.audit"],
+            "require_consent": False}]
+```
+
+`portail-web` est l'`aud` des ID tokens de l'[ADR §7](adr/0002-stack-simplifiee.md#claims-de-lid-token).
+`svc-impots` et `svc-cadastre` ne sont **pas** des clients : ce sont des
+Resource Servers, ils n'apparaissent que dans l'`aud` des access tokens.
+
+*Idempotent* : le lancer deux fois ne change rien. *Jamais de `DELETE`* : une
+entrée disparue passe `disabled`. Une lecture ratée de l'annuaire ne doit pas
+pouvoir vider la table des utilisateurs.
 
 ### `src/oidc/` — brick B2, le cœur
 
@@ -880,7 +1424,7 @@ async def authorize(request: Request, s = Depends(get_session)):
         return redirect_error(q["redirect_uri"], "invalid_request", q.get("state"))
     session = await sessions.from_cookie(s, request)   # ÉTAPE 6 : SSO ?
     if session is None:
-        it = await interactions.create(s, params)      # ÉTAPE 7
+        it = await interaction.create(s, params)       # ÉTAPE 7 (flows/interaction.py)
         return RedirectResponse(f"{settings.public_base_url}/login?uid={it.uid}", 302)
     return await issue_code(s, params, session)        # ÉTAPES 9-12
 ```
@@ -907,11 +1451,11 @@ async def exchange_code(s, body: TokenBody, client):
         RETURNING *"""), {"h": hash_token(body.code)})         # ÉTAPE 7 : atomique
     if row is None:
         await revoke_descendants(s, hash_token(body.code))     # ÉTAPE 3 : rejeu = fuite
-        raise oauth_error("invalid_grant")
+        raise OAuthError("invalid_grant")
     if row.client_id != client.id or row.redirect_uri != body.redirect_uri:
-        raise oauth_error("invalid_grant")
+        raise OAuthError("invalid_grant")
     if b64url(sha256(body.code_verifier.encode()).digest()) != row.code_challenge:   # ÉTAPE 6 : PKCE
-        raise oauth_error("invalid_grant")
+        raise OAuthError("invalid_grant")
     key = await keystore.active(s)
     return {"access_token": sign(access_claims(row), key), "id_token": sign(id_claims(row), key),
             "token_type": "Bearer", "expires_in": settings.access_token_ttl, …}
@@ -921,9 +1465,23 @@ async def exchange_code(s, body: TokenBody, client):
 simultanés du même code — Postgres n'en laisse passer qu'un. Un `SELECT` puis
 `UPDATE` laisserait passer les deux.
 
-Commencer `authorize.py` contre un `fake_authenticate()` qui renvoie un
-`user_id` seedé : c'est le seam S1. Le vrai login arrive de `flows/` quand B1
-est vert.
+**À cette étape, `flows/` n'existe pas encore.** Remplacer les deux lignes du
+`if session is None:` par `session = await fake_authenticate(s, request)` —
+une fonction de trois lignes qui prend un utilisateur seedé
+(`users.by_numero_fiscal`) et lui crée une session (`sessions.create`). C'est
+le seam S1 : tout le protocole se construit et se teste sans écran de login.
+L'étape suivante remet `interaction.create`.
+
+`issue_code(s, params, session)` couvre les étapes 9 à 12 de l'ADR :
+consentement, code aléatoire (`secrets.token_urlsafe(32)`) stocké **haché**
+(`hash_token`) avec `client_id + redirect_uri + code_challenge + user + session`,
+302 vers `redirect_uri?code=…&state=…`, puis `audit.emit("authorize.granted")`.
+
+`userinfo.py`, `revoke.py` et `end_session.py` sont courts : `/userinfo` =
+`verify_access_token` puis les claims de l'utilisateur ; `/revoke` = marquer
+le refresh token révoqué (réponse 200 même s'il est inconnu, RFC 7009) ;
+`/end-session` = révoquer la session et rediriger vers un
+`post_logout_redirect_uri` enregistré.
 
 **Pièges.**
 - `at_hash` dans l'ID token : moitié gauche du SHA-256 de l'access token, en
@@ -940,120 +1498,81 @@ est vert.
 
 Concepts : [M7](#m7--oauth-20-et-pkce), [M8](#m8--openid-connect), [M9](#m9--jwt-jwks-et-rotation-des-clés).
 
-### Routes `/admin/*` — brick B4
+### `src/flows/` — brick B1
 
-> Pas de dossier `admin/` : chaque fonctionnalité porte ses routes admin
-> (`users/routes.py`, `clients/routes.py`, `sessions/routes.py`, `keys/routes.py`).
+**Le problème.** Quand `/authorize` ne trouve pas de session, il redirige vers
+le frontend avec un `uid`. Le frontend doit demander « qu'est-ce qu'il manque
+pour authentifier cette personne ? », afficher l'étape (mot de passe,
+consentement, demain un OTP), envoyer la réponse, et recommencer. **Le serveur
+décide de l'étape**, jamais le client — sinon un client malveillant « saute »
+une étape.
 
-**Le problème.** Les écrans admin (CRUD utilisateurs, audit, rotation de clé)
-sont des routes protégées par un scope. Elles doivent vérifier le Bearer
-**exactement comme un Resource Server** — c'est le même problème, le même code.
-
-**Comment on s'en sert ici.**
-
-```python
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-bearer = HTTPBearer()
-
-def require_scope(scope: str):
-    async def dep(cred: HTTPAuthorizationCredentials = Depends(bearer), s = Depends(get_session)) -> dict:
-        claims = await verify_access_token(s, cred.credentials)   # 401 si signature/iss/aud/exp faux
-        if scope not in claims["scope"].split():
-            raise HTTPException(403, "insufficient_scope")
-        return claims
-    return dep
-
-@router.post("/admin/keys/rotate", dependencies=[Depends(require_scope("svc:admin.users"))])
-async def rotate(s = Depends(get_session)):
-    await keystore.rotate(s)         # next→active→retired, nouvelle next
-    await audit.emit(s, "keys.rotated", …)
-```
-
-`require_scope("…")` est une *fabrique de dépendance* : elle renvoie une
-fonction que FastAPI appelle avant la route. C'est le motif standard pour
-« cette route exige X ».
-
-- `HTTPBearer` : <https://fastapi.tiangolo.com/reference/security/#fastapi.security.HTTPBearer>
-- Pagination et filtres typés pour `/admin/audit` : <https://fastapi.tiangolo.com/tutorial/query-params-str-validations/>
-
-### `scripts/seed.py`
-
-**Le problème.** La base démarre vide ; le brief dit « base existante avec des
-utilisateurs déjà créés ». Il faut la remplir depuis l'annuaire (le JSON), et
-le refaire sans risque à chaque changement de fixtures.
+**Comment on s'en sert ici.** `interaction.py` contient d'abord les requêtes
+de la table `interactions` — `create(s, params) -> OAuthInteractions` (uid
+aléatoire, TTL 10 min) et `load(s, uid)` — puis remplacer
+`fake_authenticate()` dans `oidc/authorize.py` par `interaction.create`.
+Ensuite l'API :
 
 ```python
-async def main():
-    async with Session() as s:
-        for du in JsonDirectory(settings.fixtures_path).list_all():
-            await s.execute(insert(User).values(external_id=du.external_id, …, status="pending_activation")
-                            .on_conflict_do_update(index_elements=["external_id"], set_={"nom": du.nom, …}))
-        await s.commit()
+def next_step(it: OAuthInteractions, client: OAuthClients, has_consent: bool) -> str | None:
+    if it.user_id is None:        return "password"
+    # ici viendra : if it.needs_otp: return "otp"        ← le seam MFA (ADR §2)
+    if client.require_consent and not has_consent:  return "consent"
+    return None                                     # terminé → émettre le code
+
+@router.get("/interaction/{uid}")
+async def get_interaction(uid: str, s = Depends(get_session)):
+    it = await load(s, uid)                         # 404 si inconnu ou expiré
+    client = await clients.get(s, it.client_id)     # pas de relationship() : requête explicite (async)
+    return {"prompt": next_step(it, client, …), "client_name": client.name, "scopes": it.scope.split()}
+
+@router.post("/interaction/{uid}/login")
+async def login(uid: str, body: LoginBody, request: Request, response: Response, s = Depends(get_session)):
+    if not await ratelimit.hit(s, f"login:ip:{request.client.host}", 10, timedelta(minutes=1)):
+        raise HTTPException(429)
+    user = await users.by_numero_fiscal(s, body.numero_fiscal)
+    ok = await verify_password(user.password_hash if user else DUMMY_HASH, body.password)   # temps constant
+    if not user or not ok:
+        await audit.emit(s, "login.failure", actor=None, outcome="failure", detail={"reason": "bad_credentials"})
+        raise HTTPException(401)
+    session = await sessions.create(s, user, request)
+    response.set_cookie("__Host-session", str(session.id), httponly=True, secure=True, samesite="lax", path="/")
+    it.user_id = user.id
+    return {"prompt": next_step(it, …)}
 ```
 
-*Idempotent* : le lancer deux fois ne change rien. *Jamais de `DELETE`* : une
-entrée disparue passe `disabled`. Une lecture ratée de l'annuaire ne doit pas
-pouvoir vider la table des utilisateurs.
+Quand `next_step` renvoie `None`, la réponse est
+`{"redirect_to": "<issuer>/authorize?<les paramètres stockés dans l'interaction>"}`.
+Le frontend y navigue ; cette fois `/authorize` trouve le cookie de session
+(chemin SSO, étape 6) et émet le code. `flows/` n'importe donc rien d'`oidc/`.
+`POST /interaction/{uid}/consent` suit le même motif : écrit une ligne
+`consents`, puis `next_step`.
 
-### `tests/`
+*Pourquoi `DUMMY_HASH` :* si on ne hache que quand l'utilisateur existe, la
+réponse est 100 ms plus rapide pour un compte inconnu — un attaquant mesure et
+énumère les numéros fiscaux valides. On paie toujours le hash.
+*Pourquoi `__Host-` :* le préfixe force le navigateur à n'accepter le cookie
+que sur HTTPS, sans attribut `Domain`, sur `Path=/` — il ne peut pas être posé
+par un sous-domaine ni fuir vers un autre ([M3](#m3--http-cookies-cors-csp)).
 
-**Le problème.** Chaque invariant de sécurité doit être un test qui échoue si
-on le casse. Et les tests doivent tourner contre le vrai Postgres, pas un
-SQLite qui accepte ce que Postgres refuse.
+`activation.py` et `reset.py` suivent le même schéma : `request` génère un
+jeton aléatoire, en stocke le **hash**, envoie le lien par le `Mailer`, et
+répond `202` **que le compte existe ou non** ; `confirm` retrouve le jeton par
+son hash, vérifie `expires_at` et `consumed_at`, pose le mot de passe.
 
-**L'outil.** `pytest` exécute les fonctions `test_*`. `httpx.ASGITransport`
-appelle l'application FastAPI **directement en mémoire**, sans serveur ni
-réseau, mais avec le vrai cycle requête/réponse. Les *fixtures* pytest
-fournissent aux tests ce dont ils ont besoin (un client, une session, un
-utilisateur seedé).
+- Cookies avec FastAPI : <https://fastapi.tiangolo.com/advanced/response-cookies/>
+- Spécifié par [ADR §9 — interaction](adr/0002-stack-simplifiee.md#api-dinteraction--la-nôtre-consommée-par-le-frontend), [§9 — compte](adr/0002-stack-simplifiee.md#cycle-de-vie-du-compte), [arch §4](architecture.md#4-le-parcours-dauthentification).
 
-**Comment on s'en sert ici.**
+Concepts : [M3](#m3--http-cookies-cors-csp), [M6](#m6--mots-de-passe-et-credentials).
 
-```
-tests/
-├── conftest.py        fixtures partagées
-├── unit/              domain/ · pkce · scopes · password — sans base
-├── integration/       une classe par router, contre le Postgres du compose
-├── test_smoke.py      le flow complet, ~30 lignes (ADR §15)
-└── security/          une assertion de l'ADR §15 par fichier
-```
+### `src/ops/`
 
-```python
-# conftest.py
-@pytest.fixture
-async def client():
-    async with AsyncClient(transport=ASGITransport(app=create_app()),
-                           base_url="https://auth.authentint.local") as c:
-        yield c
+`routes.py` : `/health/live` (le processus répond), `/health/ready` (la base
+répond : un `SELECT 1`), `/metrics` (format Prometheus). Ce sont les sondes
+Kubernetes ([ADR §9 — Ops](adr/0002-stack-simplifiee.md#ops)).
 
-@pytest.fixture
-async def s():
-    async with engine.connect() as conn:
-        await conn.begin()
-        async with AsyncSession(bind=conn) as session:
-            yield session
-        await conn.rollback()          # chaque test repart d'une base propre
-```
-
-```python
-# security/test_redirect_uri.py
-async def test_bad_redirect_uri_never_redirects(client, seeded_client):
-    r = await client.get("/authorize", params={"client_id": seeded_client.id,
-                         "redirect_uri": "https://evil.example/cb", …})
-    assert r.status_code == 400          # pas 302
-    assert "location" not in r.headers
-```
-
-`make test` = `docker compose exec auth-server pytest` : les tests tournent
-**dans** le conteneur, où `postgres:5432` est joignable. Pas de base de test
-séparée.
-
-**Lire.**
-- Fixtures : <https://docs.pytest.org/en/stable/how-to/fixtures.html>
-- Transaction rollbackée par test : <https://docs.sqlalchemy.org/en/20/orm/session_transaction.html#joining-a-session-into-an-external-transaction-such-as-for-test-suites>
-- `ASGITransport` : <https://www.python-httpx.org/advanced/transports/#asgitransport>
-
-Concept : [M11](#m11--tests).
+- Sondes : <https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/>
+- `prometheus-client` : <https://prometheus.github.io/client_python/>
 
 ---
 
@@ -1100,7 +1619,7 @@ apps/frontend/
 ```bash
 npm create vite@latest frontend -- --template react-ts
 cd frontend && npm i react-router openapi-fetch && npm i -D msw openapi-typescript @playwright/test
-npx openapi-typescript https://auth.authentint.local/openapi.json -o src/api/schema.d.ts
+npx openapi-typescript https://auth.authentint.localhost/openapi.json -o src/api/schema.d.ts
 ```
 
 Le client API typé :
@@ -1109,7 +1628,7 @@ Le client API typé :
 // src/api/client.ts
 import createClient from "openapi-fetch";
 import type { paths } from "./schema";
-export const api = createClient<paths>({ baseUrl: "https://auth.authentint.local", credentials: "include" });
+export const api = createClient<paths>({ baseUrl: "https://auth.authentint.localhost", credentials: "include" });
 
 // dans une page
 const { data } = await api.GET("/interaction/{uid}", { params: { path: { uid } } });
@@ -1179,7 +1698,7 @@ COPY Caddyfile /etc/caddy/Caddyfile
 	root * /srv
 	try_files {path} /index.html          # SPA : /account/sessions n'est pas un fichier → index.html, le router fait le reste
 	file_server
-	header Content-Security-Policy "default-src 'self'; connect-src 'self' https://auth.authentint.local; frame-ancestors 'none'"
+	header Content-Security-Policy "default-src 'self'; connect-src 'self' https://auth.authentint.localhost; frame-ancestors 'none'"
 }
 ```
 
@@ -1324,20 +1843,6 @@ Concepts : [M9](#m9--jwt-jwks-et-rotation-des-clés), [arch §3](architecture.md
 
 ---
 
-## `fixtures/users.json`
-
-**Le problème.** Pas de LDAP à installer, mais il faut des utilisateurs.
-
-**Comment on s'en sert ici.** Le format est dans
-[ADR §6](adr/0002-stack-simplifiee.md#6-source-des-utilisateurs--json-au-lieu-de-ldap).
-Une dizaine d'entrées : un `admin`, deux `agent`, trois `contribuable`, un
-compte qu'on retirera du fichier pour tester le passage en `disabled` au
-second seed. Données inventées — numéros fiscaux à 13 chiffres qui ne
-correspondent à personne, mails en `@example.gouv.fr`. Lu uniquement par
-`JsonDirectory`.
-
----
-
 ## `k8s/` — le chart Helm
 
 **Le problème.** Le client fournit un cluster Kubernetes. Il faut y déployer
@@ -1443,7 +1948,7 @@ export const options = {
 };
 
 export default function () {                       // sso : cookie déjà posé → /authorize → 302 direct
-  const r = http.get("https://auth.authentint.local/authorize?client_id=…&code_challenge=…", { redirects: 0, cookies: { "__Host-session": __ENV.SID } });
+  const r = http.get("https://auth.authentint.localhost/authorize?client_id=…&code_challenge=…", { redirects: 0, cookies: { "__Host-session": __ENV.SID } });
   check(r, { "302": (r) => r.status === 302 });
 }
 export function login() { /* /authorize → /interaction/{uid}/login → /token */ }
@@ -1454,7 +1959,7 @@ docker run --rm --network authent-int_edge -v ./load:/scripts grafana/k6 run /sc
 ```
 
 Lancé **depuis un conteneur sur le réseau `edge`**, parce que c'est là que
-`auth.authentint.local` résout. Deux runs : `--scale auth-server=1` puis `=3`.
+`auth.authentint.localhost` résout. Deux runs : `--scale auth-server=1` puis `=3`.
 Si le p95 du scénario `login` ne s'améliore pas avec trois réplicas, quelque
 chose n'est pas sans état. Le rapport et son interprétation vont dans le
 `README.md` ([ADR §19](adr/0002-stack-simplifiee.md#19-définition-de--terminé-)).
@@ -1593,7 +2098,7 @@ Suite : [M2](#m2--caddy-tls-et-noms-dhôte).
 chercher les clés publiques à cette adresse. Si le navigateur voit
 `localhost:8000` et les conteneurs voient `auth-server:8000`, il y a deux
 noms pour un seul émetteur, et ça casse à la première vérification. Caddy est
-le programme qui porte **un seul nom**, `auth.authentint.local`, vu par tout
+le programme qui porte **un seul nom**, `auth.authentint.localhost`, vu par tout
 le monde : le navigateur y arrive par le port 443 de la machine, les
 conteneurs par un alias DNS Docker. Et Caddy fait le HTTPS tout seul, avec sa
 propre autorité de certification.
@@ -1659,7 +2164,7 @@ la doc OpenAPI dont le front tire ses types.
 
 **Savoir faire à la fin :** expliquer pourquoi `argon2.verify()` bloque *toutes* les requêtes s'il tourne sur la boucle d'événements, écrire une route FastAPI validée par Pydantic, écrire un `Protocol` et une implémentation.
 
-**Construit :** [main.py](#srcauthentintmainpy), [infra/](#srcinfra--ce-qui-touche-le-monde-extérieur).
+**Construit :** [main.py](#srcauthentintmainpy), [config.py](#srcauthentintconfigpy), [infra/](#srcinfra--connexion-et-modèles-rien-dautre).
 
 **Prépare :** [ADR §5 — stack et piège Python](adr/0002-stack-simplifiee.md#5-stack-technique), [ADR §6 — `UserDirectory`](adr/0002-stack-simplifiee.md#le-port-reste-le-même). **Dépend de :** [M0](#m0--comprendre-le-projet-avant-tout).
 
@@ -1688,7 +2193,7 @@ point. Alembic versionne le schéma.
 
 **Savoir faire à la fin :** écrire l'upsert du rate limit, le `UPDATE … WHERE consumed_at IS NULL RETURNING` de consommation atomique, un advisory lock pour la génération de clé, un `REVOKE` sur `audit_events`, une migration Alembic.
 
-**Construit :** [alembic/](#alembic--le-schéma-est-un-livrable), [infra/](#srcinfra--ce-qui-touche-le-monde-extérieur).
+**Construit :** [alembic/](#alembic--le-schéma-est-un-livrable), [infra/](#srcinfra--connexion-et-modèles-rien-dautre), [users/ · clients/ · sessions/](#users--clients--sessions--une-fonctionnalité-un-dossier).
 
 **Prépare :** [ADR §3 — Valkey remplacé](adr/0002-stack-simplifiee.md#3-valkey--la-question-tranchée), [ADR §8 — modèle de données](adr/0002-stack-simplifiee.md#8-modèle-de-données), [architecture.md §5](architecture.md#5-modèle-de-données), brick **B0** (migration v1), **B1**, **B4**. **Dépend de :** [M4](#m4--python-async-fastapi-pydantic).
 
@@ -1718,7 +2223,7 @@ des comptes. Même réponse, même temps.
 
 **Savoir faire à la fin :** hacher avec Argon2id (paramètres calibrés), stocker haché tout jeton d'activation / reset / code / refresh, rendre les endpoints `request` non-oracles (même réponse, même temps), verrouiller un compte avec backoff.
 
-**Construit :** [security/passwords.py](#securitypasswordspy), [flows/](#srcflows--brick-b1).
+**Construit :** [security/passwords.py](#passwordspy), [flows/](#srcflows--brick-b1).
 
 **Prépare :** [ADR §6 — magasin de credentials](adr/0002-stack-simplifiee.md#ce-que-la-lecture-seule-implique-sur-les-mots-de-passe), [ADR §8 — règle absolue](adr/0002-stack-simplifiee.md#credentials-et-récupération), [ADR §9 — cycle de vie du compte](adr/0002-stack-simplifiee.md#cycle-de-vie-du-compte), brick **B1**. **Dépend de :** [M3](#m3--http-cookies-cors-csp), [M5](#m5--postgres-sqlalchemy-20-alembic).
 
@@ -1813,7 +2318,7 @@ pour qu'aucun jeton en circulation ne devienne invalide.
 
 **Savoir faire à la fin :** signer un JWT RS256 avec `kid`, publier un JWKS, le vérifier côté Resource Server avec l'algorithme **épinglé**, forger un `alg: none` et un HS256-avec-clé-publique et les voir rejetés, faire tourner une clé sans invalider un jeton.
 
-**Construit :** [oidc/](#srcoidc--brick-b2-le-cœur), [keys/keystore.py](#keyskeystorepy), [mock-services](#appsmock-services--les-resource-servers).
+**Construit :** [oidc/](#srcoidc--brick-b2-le-cœur), [keys/keystore.py](#keystorepy), [mock-services](#appsmock-services--les-resource-servers).
 
 **Prépare :** [ADR §11](adr/0002-stack-simplifiee.md#11-jwks--le-mécanisme-à-comprendre), [ADR §12](adr/0002-stack-simplifiee.md#12-rotation-des-clés--sans-cronjob), [architecture.md §3, §6](architecture.md#3-accès-à-un-service-et-validation-jwks), bricks **B2** et **B3**. **Dépend de :** [M8](#m8--openid-connect), [M2](#m2--caddy-tls-et-noms-dhôte).
 

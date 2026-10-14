@@ -5,15 +5,21 @@ from fastapi import Request
 from fastapi import Depends
 from fastapi.responses import RedirectResponse
 from typing import Literal
+from urllib.parse import urlencode
 
 from . import router
 from authentint.config import settings
 from authentint.clients import queries as clients
+from authentint.infra.models.identity import User
+from authentint.infra.models.identity import UserStatus
 from authentint.infra.database import get_session
 from authentint.sessions.queries import from_cookie
 from authentint.domain.errors import error_page
 from authentint.domain.errors import redirect_error
 from authentint.oidc.codes import issue_code
+from authentint.domain.scopes import grant
+from authentint.audit import audit
+from authentint.flows import consent as consents
 from authentint.flows import interaction
 
 
@@ -57,4 +63,25 @@ async def authorize(request: Request, session=Depends(get_session)):
 
         return RedirectResponse(f"{settings.public_base_url}/login?uid={it.uid}", 302)
 
-    return await issue_code(session, params, sso)
+    user = await session.get(User, sso.user_id)
+
+    if user is None or user.status != UserStatus.active:
+        return redirect_error(query["redirect_uri"], "access_denied", query.get("state"))
+
+    requested = set(params.scope.split())
+    granted = grant(requested, user.role, client)
+
+    if granted != requested:
+        await audit.emit(session, "authorize.scope_reduced", actor=user.id, outcome="success", detail={"requested": sorted(requested), "granted": sorted(granted)})
+
+    # ADR §10 step 9: a live session is not consent. Without this, any client requiring consent
+    # would get a code for a logged-in user who never agreed, just by sending them here.
+    if client.require_consent and not await consents.covers(session, user.id, client.id, granted):
+        it = await interaction.create(session, params, user_id=user.id)  # known user: the first step is consent
+
+        return RedirectResponse(f"{settings.public_base_url}/login?uid={it.uid}", 302)
+
+    oauth_auth_code = await issue_code(session, params, sso, " ".join(sorted(granted)))
+    redirect_url = f"{params.redirect_uri}{"&" if "?" in params.redirect_uri else "?"}{urlencode({"code": oauth_auth_code, "state": params.state})}"
+
+    return RedirectResponse(redirect_url, 302)
