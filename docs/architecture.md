@@ -326,7 +326,7 @@ erDiagram
     users {
         uuid id PK
         text external_id UK "clé annuaire"
-        text numero_fiscal UK "chiffré, jamais dans un JWT"
+        text numero_fiscal_hmac UK "HMAC du numéro, jamais le numéro"
         text email
         text nom
         text prenom
@@ -562,7 +562,7 @@ L'autorisation est appliquée par chaque Resource Server.
 
 | Donnée | Où | Règle |
 | --- | --- | --- |
-| `numero_fiscal` | `users`, chiffré | Identifiant de login. **Jamais** dans un JWT, une URL, un log |
+| `numero_fiscal` | **nulle part** : `users.numero_fiscal_hmac` en garde le HMAC | Identifiant de login. **Jamais** stocké, ni dans un JWT, une URL, un log |
 | `sub` | claim, = `users.id` | UUIDv4 opaque, stable, sans signification externe |
 | `sid` | claim, = `sessions.id` | Sert au logout et à la révocation d'appareil |
 | `external_id` | `users` | Clé de jointure vers l'annuaire. Jamais un DN |

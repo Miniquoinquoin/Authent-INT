@@ -20,6 +20,8 @@ from urllib.parse import urlencode
 
 from fastapi import Depends
 from fastapi import HTTPException
+from fastapi import Request
+from fastapi import Response
 from pydantic import BaseModel
 from pydantic import Field
 from sqlalchemy import func
@@ -28,13 +30,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import router
 from authentint.config import settings
+from authentint.audit import audit
 from authentint.clients import queries as clients
+from authentint.domain.errors import error_url
+from authentint.flows import consent as consents
+from authentint.flows.login import AccountLocked
+from authentint.flows.login import authenticate
 from authentint.infra.database import get_session
+from authentint.sessions import queries as sessions
 from authentint.infra.models.oauth import OAuthClients
 from authentint.infra.models.oauth import OAuthInteractions
+from authentint.security import ratelimit
 
 
 TTL = timedelta(minutes=10)
+
+LOGIN_LIMIT = 10                      # login attempts per IP...
+LOGIN_WINDOW = timedelta(minutes=1)   # ...per minute: a family behind one box is fine, a script is not
 
 Prompt = Literal["login", "consent"]  # the MFA seam (ADR §2) will add "otp"
 
@@ -74,11 +86,11 @@ async def load(session: AsyncSession, uid: str) -> OAuthInteractions:
 
     return it
 
-def next_step(it: OAuthInteractions, client: OAuthClients) -> Prompt | None:
+def next_step(it: OAuthInteractions, client: OAuthClients, has_consent: bool) -> Prompt | None:
     if it.user_id is None:
         return "login"
-    # B1: `if needs_otp: return "otp"` goes here, then skip consent when a consents row already covers it.scope
-    if client.require_consent:
+    # the MFA seam (ADR §2) goes here: `if needs_otp: return "otp"`
+    if client.require_consent and not has_consent:
         return "consent"
     return None
 
@@ -93,7 +105,8 @@ def resume_url(it: OAuthInteractions) -> str:
 
 async def view(session: AsyncSession, it: OAuthInteractions) -> InteractionView:
     client = await clients.get(session, it.client_id)
-    prompt = next_step(it, client)
+    has_consent = it.user_id is not None and await consents.covers(session, it.user_id, it.client_id, set(it.scope.split()))
+    prompt = next_step(it, client, has_consent)
 
     return InteractionView(prompt=prompt, client_name=client.name, scopes=it.scope.split(),
                            redirect_to=resume_url(it) if prompt is None else None)
@@ -108,18 +121,59 @@ async def get_interaction(uid: str, session: AsyncSession = Depends(get_session)
     404: {"description": "Unknown or expired uid"},
     423: {"description": "Account locked"},
     429: {"description": "Rate limited"},
-    501: {"description": "Not built yet (B1)"},
 })
-async def login(uid: str, body: LoginBody, session: AsyncSession = Depends(get_session)):
+async def login(uid: str, body: LoginBody, request: Request, response: Response,
+                session: AsyncSession = Depends(get_session)):
     """On success, sets the `__Host-session` cookie and answers the next step."""
 
-    raise HTTPException(501, "B1: password check, lockout, rate limit, sessions.create")
+    # First, before any Argon2 work: one source cannot try more than LOGIN_LIMIT times per LOGIN_WINDOW
+    ip = request.client.host if request.client else "unknown"
+    if not await ratelimit.hit(session, f"login:ip:{ip}", LOGIN_LIMIT, LOGIN_WINDOW):
+        raise HTTPException(429, "too_many_attempts")
+    await session.commit()  # the counter must survive whatever happens next (401, 423, 404...)
+
+    it = await load(session, uid)
+    try:
+        user = await authenticate(session, body.numero_fiscal, body.password)
+    except AccountLocked:
+        await session.commit()  # keep the login.locked audit event
+        raise HTTPException(423, "account_locked")
+
+    if user is None:
+        await session.commit()  # keep the failure count (lockout)
+        raise HTTPException(401, "invalid_credentials")
+
+    sso = await sessions.create(session, user, request)
+    it.user_id = user.id
+    await audit.emit(session, "login.success", actor=user.id, outcome="success", detail={"sid": str(sso.id)})
+    await session.commit()  # session + interaction + audit, together
+
+    response.set_cookie("__Host-session", str(sso.id), httponly=True, secure=True, samesite="lax", path="/")
+
+    return await view(session, it)
 
 @router.post("/interaction/{uid}/consent", response_model=InteractionView, responses={
+    400: {"description": "Not logged in yet: login comes first"},
     404: {"description": "Unknown or expired uid"},
-    501: {"description": "Not built yet (B1)"},
 })
 async def consent(uid: str, body: ConsentBody, session: AsyncSession = Depends(get_session)):
     """approve=false ends the flow: redirect_to then carries error=access_denied."""
 
-    raise HTTPException(501, "B1: store the consents row, or end with access_denied")
+    it = await load(session, uid)
+    if it.user_id is None:
+        raise HTTPException(400, "login_required")  # the server decides the order of the steps, not the client
+
+    if not body.approve:
+        it.expires_at = func.now()  # the flow is over: this uid can't be replayed (DB clock, like load())
+        await audit.emit(session, "consent.denied", actor=it.user_id, outcome="failure", detail={"client_id": it.client_id})
+        await session.commit()
+        client = await clients.get(session, it.client_id)
+        return InteractionView(prompt=None, client_name=client.name, scopes=it.scope.split(),
+                               redirect_to=error_url(it.redirect_uri, "access_denied", it.state))
+
+    await consents.record(session, it.user_id, it.client_id, set(it.scope.split()))
+    await audit.emit(session, "consent.granted", actor=it.user_id, outcome="success",
+                     detail={"client_id": it.client_id, "scopes": it.scope.split()})
+    await session.commit()
+
+    return await view(session, it)

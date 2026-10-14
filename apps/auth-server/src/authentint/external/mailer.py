@@ -9,4 +9,9 @@ class Mailer(Protocol):
 
 class ConsoleMailer:
     async def send(self, to: str, subject: str, body: str):
-        log.info("mail", extra={"to": to, "subject": subject, "body": body})
+        log.warning("mail to=%s subject=%r\n%s", to, subject, body)  # dev: the link shows in `make logs`
+
+def get_mailer() -> Mailer:
+    """FastAPI dependency: SmtpMailer replaces ConsoleMailer here once the client picks a relay (ADR §18 q.6)."""
+
+    return ConsoleMailer()

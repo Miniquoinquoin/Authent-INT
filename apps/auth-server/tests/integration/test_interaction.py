@@ -3,7 +3,10 @@
 from urllib.parse import parse_qs
 from urllib.parse import urlsplit
 
+from uuid import UUID
+
 from authentint.config import settings
+from authentint.infra.models.audit import Sessions
 
 
 async def start(client, authorize_params) -> str:
@@ -29,10 +32,38 @@ async def test_unknown_uid_is_404(client):
     r = await client.get("/interaction/does-not-exist")
     assert r.status_code == 404
 
-async def test_login_contract_is_published_but_not_built(client, authorize_params):
+async def test_right_credentials_finish_the_interaction(client, authorize_params, alice, alice_password):
     uid = await start(client, authorize_params)
-    r = await client.post(f"/interaction/{uid}/login", json={"numero_fiscal": "1801234567890", "password": "x"})
-    assert r.status_code == 501  # B1 replaces this test with the real ones
+    r = await client.post(f"/interaction/{uid}/login", json={"numero_fiscal": alice.numero_fiscal, "password": alice_password})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["prompt"] is None  # test-spa requires no consent: nothing left to ask
+    assert body["redirect_to"].startswith(f"{settings.issuer}/authorize?")
+
+async def test_login_sets_the_session_cookie(client, s, authorize_params, alice, alice_password):
+    uid = await start(client, authorize_params)
+    r = await client.post(f"/interaction/{uid}/login", json={"numero_fiscal": alice.numero_fiscal, "password": alice_password})
+    cookie = r.headers["set-cookie"]
+    name, value = cookie.split(";")[0].split("=", 1)
+    assert name == "__Host-session"
+    stored = await s.get(Sessions, UUID(value))  # the cookie carries the id of a real session...
+    assert stored.user_id == alice.id            # ...that belongs to alice
+
+async def test_the_session_cookie_is_locked_down(client, authorize_params, alice, alice_password):
+    uid = await start(client, authorize_params)
+    r = await client.post(f"/interaction/{uid}/login", json={"numero_fiscal": alice.numero_fiscal, "password": alice_password})
+    attributes = [a.strip().lower() for a in r.headers["set-cookie"].split(";")[1:]]
+    assert "httponly" in attributes      # JavaScript cannot read it: an XSS cannot steal the session
+    assert "secure" in attributes        # only sent over HTTPS
+    assert "samesite=lax" in attributes  # not sent by cross-site POSTs: blocks CSRF
+    assert "path=/" in attributes        # required by the __Host- prefix
+    assert not any(a.startswith("domain") for a in attributes)  # __Host-: never shared with sub-domains
+
+async def test_wrong_credentials_are_401_without_cookie(client, authorize_params, alice):
+    uid = await start(client, authorize_params)
+    r = await client.post(f"/interaction/{uid}/login", json={"numero_fiscal": alice.numero_fiscal, "password": "wrong"})
+    assert r.status_code == 401
+    assert "set-cookie" not in r.headers
 
 async def test_login_rejects_a_malformed_numero_fiscal(client, authorize_params):
     uid = await start(client, authorize_params)

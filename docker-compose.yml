@@ -10,6 +10,7 @@ x-auth-env: &auth-env
   ISSUER: https://auth.authentint.localhost
   PUBLIC_BASE_URL: https://app.authentint.localhost
   KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:?KEY_ENCRYPTION_KEY vide dans .env, voir .env.example}
+  NUMERO_FISCAL_KEY: ${NUMERO_FISCAL_KEY:?NUMERO_FISCAL_KEY vide dans .env, voir .env.example}
   DATABASE_URL: postgresql+asyncpg://authentint_app:${POSTGRES_PASSWORD:-authentint}@postgres:5432/authentint
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
@@ -68,7 +69,14 @@ services:
   auth-server:
     build: ./apps/auth-server
     restart: unless-stopped
-    environment: *auth-env
+    environment:
+      <<: *auth-env
+      # uvicorn only believes X-Forwarded-For from trusted proxies (default: 127.0.0.1).
+      # Without this, request.client.host is Caddy's IP for EVERY user, and the
+      # per-IP rate limit would put all of France in one bucket. "*" is acceptable
+      # because no port is published: only containers on `edge` reach auth-server.
+      # Kubernetes: replace by the Ingress controller's pod CIDR (§12).
+      FORWARDED_ALLOW_IPS: "*"
     networks: [edge, data] # le seul service sur les deux réseaux
     depends_on:
       migrate:
