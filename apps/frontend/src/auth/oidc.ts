@@ -187,6 +187,7 @@ export function completeLogin(search: string): Promise<Session> {
  */
 export function logout(): void {
   setSession(null)
+  inflight.clear() // the settled promises still hold the tokens
   const query = new URLSearchParams({ client_id: CLIENT_ID, post_logout_redirect_uri: POST_LOGOUT_REDIRECT_URI })
   leaveTo(`${AUTH_URL}/end-session?${query}`)
 }
