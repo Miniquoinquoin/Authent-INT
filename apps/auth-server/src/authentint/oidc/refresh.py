@@ -90,5 +90,5 @@ async def replayed(session: AsyncSession, row: OAuthRefreshTokens) -> None:
 
     await revoke_session(session, row.session_id, "refresh_reuse")  # a family never spans sessions: this covers it
     await audit.emit(session, "token.refresh_reuse", actor=row.user_id, outcome="failure",
-                     detail={"severity": "high", "client_id": row.client_id})
+                     detail={"severity": "high"}, client_id=row.client_id, session_id=row.session_id)
     await session.commit()

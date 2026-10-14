@@ -35,7 +35,8 @@ async def end_session(request: Request, session: AsyncSession = Depends(get_sess
 
     if sso is not None:
         await refresh.revoke_session(session, sso.id, "logout")  # its refresh tokens too: logout means logged out everywhere it reached
-        await audit.emit(session, "logout", actor=sso.user_id, outcome="success", detail={"sid": str(sso.id), "client_id": client.id})
+        await audit.emit(session, "logout", actor=sso.user_id, outcome="success", detail={},
+                         client_id=client.id, session_id=sso.id)
         await session.commit()
 
     state = query.get("state")

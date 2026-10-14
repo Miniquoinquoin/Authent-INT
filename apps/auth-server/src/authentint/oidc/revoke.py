@@ -44,7 +44,8 @@ async def revoke(body: Annotated[RevokeBody, Form()], credentials: HTTPBasicCred
             raise OAuthError("invalid_grant")
 
         await refresh.revoke_family(session, row.family_id, "revoked_by_client")
-        await audit.emit(session, "token.revoked", actor=row.user_id, outcome="success", detail={"client_id": client.id})
+        await audit.emit(session, "token.revoked", actor=row.user_id, outcome="success", detail={},
+                         client_id=client.id, session_id=row.session_id)
         await session.commit()
 
     return Response(status_code=200, headers={"Cache-Control": "no-store"})

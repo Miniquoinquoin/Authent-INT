@@ -166,7 +166,7 @@ async def login(uid: str, body: LoginBody, request: Request, response: Response,
 
     sso = await sessions.create(session, user, request)
     it.user_id = user.id
-    await audit.emit(session, "login.success", actor=user.id, outcome="success", detail={"sid": str(sso.id)})
+    await audit.emit(session, "login.success", actor=user.id, outcome="success", detail={}, session_id=sso.id)
     await session.commit()  # session + interaction + audit, together
 
     response.set_cookie("__Host-session", str(sso.id), httponly=True, secure=True, samesite="lax", path="/")
@@ -189,14 +189,14 @@ async def consent(uid: str, body: ConsentBody, session: AsyncSession = Depends(g
 
     if not body.approve:
         it.expires_at = func.now()  # the flow is over: this uid can't be replayed (DB clock, like load())
-        await audit.emit(session, "consent.denied", actor=it.user_id, outcome="failure", detail={"client_id": it.client_id})
+        await audit.emit(session, "consent.denied", actor=it.user_id, outcome="failure", detail={}, client_id=it.client_id)
         await session.commit()
         return InteractionView(prompt=None, client_name=client.name, scopes=scopes,
                                redirect_to=error_url(it.redirect_uri, "access_denied", it.state))
 
     await consents.record(session, it.user_id, it.client_id, set(scopes))
     await audit.emit(session, "consent.granted", actor=it.user_id, outcome="success",
-                     detail={"client_id": it.client_id, "scopes": scopes})
+                     detail={"scopes": scopes}, client_id=it.client_id)
     await session.commit()
 
     return await view(session, it)

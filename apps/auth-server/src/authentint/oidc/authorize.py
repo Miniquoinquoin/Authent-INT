@@ -74,7 +74,8 @@ async def authorize(request: Request, session=Depends(get_session)):
     granted = grant(requested, user.role, client)
 
     if granted != requested:
-        await audit.emit(session, "authorize.scope_reduced", actor=user.id, outcome="success", detail={"requested": sorted(requested), "granted": sorted(granted)})
+        await audit.emit(session, "authorize.scope_reduced", actor=user.id, outcome="success", detail={"requested": sorted(requested), "granted": sorted(granted)},
+                         client_id=client.id, session_id=sso.id)
 
     # ADR §10 step 9: a live session is not consent. Without this, any client requiring consent
     # would get a code for a logged-in user who never agreed, just by sending them here.

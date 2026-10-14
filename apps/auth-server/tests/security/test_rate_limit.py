@@ -6,6 +6,8 @@ from locking thousands of accounts on purpose).
 
 from datetime import timedelta
 
+from sqlalchemy import text
+
 from authentint.flows.interaction import LOGIN_LIMIT
 from authentint.security import ratelimit
 
@@ -43,3 +45,10 @@ async def test_the_limiter_fails_closed():
             raise ConnectionError("postgres is down")
 
     assert await ratelimit.hit(BrokenDatabase(), "login:ip:1.2.3.4", 10, timedelta(minutes=1)) is False
+
+async def test_expired_buckets_are_swept_lazily(s):
+    # ADR §8 "Nettoyage sans CronJob": forced here (cleanup=1), 1 hit in 100 in production
+    await s.execute(text("INSERT INTO rate_limits (bucket, count, expires_at) VALUES ('old', 3, now() - interval '1 minute')"))
+    assert await ratelimit.hit(s, "login:ip:1.2.3.4", 10, timedelta(minutes=1), cleanup=1.0)
+    assert await s.scalar(text("SELECT count(*) FROM rate_limits WHERE bucket = 'old'")) == 0
+    assert await s.scalar(text("SELECT count(*) FROM rate_limits WHERE bucket = 'login:ip:1.2.3.4'")) == 1  # live ones stay

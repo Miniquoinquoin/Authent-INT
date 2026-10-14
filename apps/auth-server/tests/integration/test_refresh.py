@@ -69,7 +69,7 @@ async def test_a_reused_token_revokes_the_family_and_the_session(client, s, wide
     assert sso.revoked_at is not None and sso.revocation_reason == "refresh_reuse"
 
     event = await s.scalar(select(AuditEvents).where(AuditEvents.event_type == "token.refresh_reuse").order_by(AuditEvents.id.desc()))
-    assert event.detail == {"severity": "high", "client_id": wide_spa.id}
+    assert event.detail == {"severity": "high"} and event.client_id == wide_spa.id and event.session_id == sso.id
 
 async def test_another_clients_token_is_an_invalid_grant(client, s, offline_tokens, make_user, login_as):
     await login_as(await make_user())
