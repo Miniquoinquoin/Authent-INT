@@ -1,0 +1,43 @@
+# B6 (ADR §16, docs/threat-model.md): known-vulnerable dependencies fail the build.
+# Weekly too: a CVE published on a dependency nobody touched still needs to surface.
+# A finding that cannot be fixed by a bump gets an explicit, justified ignore in
+# docs/threat-model.md (pip-audit --ignore-vuln / npm overrides), never a silent one.
+name: audit
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        app: [auth-server, mock-services]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      # The runtime set only (--no-dev), exactly as uv.lock pins it; the project itself is not on PyPI.
+      # --disable-pip: everything is pinned, pip-audit needs no resolver venv.
+      - name: pip-audit
+        working-directory: apps/${{ matrix.app }}
+        run: |
+          uv export --frozen --no-dev --no-emit-project --format requirements-txt > /tmp/requirements.txt
+          uvx pip-audit --disable-pip -r /tmp/requirements.txt
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      # What ships to the browser only: dev tooling never reaches a user
+      - run: npm audit --audit-level=high --omit=dev
