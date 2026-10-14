@@ -15,6 +15,7 @@ from datetime import timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from authentint.audit import audit
 from authentint.infra.models.identity import User
 from authentint.infra.models.identity import UserStatus
 from authentint.security.passwords import pwd_hasher
@@ -59,11 +60,14 @@ async def authenticate(session: AsyncSession, numero_fiscal: str, password: str)
     if user is not None and is_locked(user, now):
         # after Argon2 (same time as always), before looking at `ok`: while locked,
         # the answer never tells whether the password was right
+        await audit.emit(session, "login.locked", actor=user.id, outcome="failure", detail={})
         raise AccountLocked()
 
     if not ok:
         if user is not None:
             record_failure(user, now)  # the route commits it, so the count survives the 401
+
+        await audit.emit(session, "login.failure", actor=user.id if user is not None else None, outcome="failure", detail={"reason": "bad_credentials"})
         return None
 
     user.failed_login_count = 0  # a success forgives the previous failures

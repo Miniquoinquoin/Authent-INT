@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import router
 from authentint.config import settings
+from authentint.audit import audit
 from authentint.clients import queries as clients
 from authentint.flows.login import AccountLocked
 from authentint.flows.login import authenticate
@@ -132,6 +133,7 @@ async def login(uid: str, body: LoginBody, request: Request, response: Response,
     try:
         user = await authenticate(session, body.numero_fiscal, body.password)
     except AccountLocked:
+        await session.commit()  # keep the login.locked audit event
         raise HTTPException(423, "account_locked")
 
     if user is None:
@@ -140,7 +142,8 @@ async def login(uid: str, body: LoginBody, request: Request, response: Response,
 
     sso = await sessions.create(session, user, request)
     it.user_id = user.id
-    await session.commit()  # session + interaction, together
+    await audit.emit(session, "login.success", actor=user.id, outcome="success", detail={"sid": str(sso.id)})
+    await session.commit()  # session + interaction + audit, together
 
     response.set_cookie("__Host-session", str(sso.id), httponly=True, secure=True, samesite="lax", path="/")
 
