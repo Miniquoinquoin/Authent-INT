@@ -32,7 +32,7 @@ async def s():
 async def client(s):
     app = create_app()
     app.dependency_overrides[get_session] = lambda: s  # the routes share the test's transaction
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://auth.authentint.local") as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://auth.authentint.localhost") as c:
         yield c
 
 @pytest.fixture

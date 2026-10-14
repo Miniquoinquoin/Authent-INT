@@ -34,8 +34,8 @@ DEV_PASSWORD = "Authentint-dev-1!"  # DEV ONLY — shared by every seeded user
 SEED_USERS = 5  # ponytail: first 5 fixtures only (1 admin, 2 agents, 2 contribuables); argon2 on all 10 006 would take minutes
 
 CLIENTS = [{"id": "portail-web", "name": "Portail", "type": "public", "secret_hash": None,
-            "redirect_uris": ["https://app.authentint.local/callback"],  # to align with the frontend router
-            "post_logout_redirect_uris": ["https://app.authentint.local/"],
+            "redirect_uris": ["https://app.authentint.localhost/callback"],  # to align with the frontend router
+            "post_logout_redirect_uris": ["https://app.authentint.localhost/"],
             "allowed_grants": ["authorization_code", "refresh_token"],
             "allowed_scopes": ["openid", "offline_access", "svc:impots.read", "svc:impots.write",
                                "svc:cadastre.read", "svc:cadastre.write", "svc:admin.users", "svc:admin.audit"],
