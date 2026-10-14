@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "gen:api": "openapi-typescript ../../docs/generated/openapi.json -o src/api/types.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "dev:mock": "vite --mode mock",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "react": "^19.2.8",
