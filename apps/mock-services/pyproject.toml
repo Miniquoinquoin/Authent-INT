@@ -1,0 +1,34 @@
+[project]
+name = "mock-services"
+version = "0.1.0"
+description = "Mock Resource Servers (svc-impots, svc-cadastre): verify Authent'INT access tokens locally against the issuer's JWKS"
+readme = "README.md"
+authors = [
+    { name = "Ma115tte", email = "73129460+Ma115tte@users.noreply.github.com" },
+    { name = "Miniquoinquoin", email = "69959845+Miniquoinquoin@users.noreply.github.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "joserfc>=1.7.5",
+    "pydantic-settings>=2.15.0",
+    "uvicorn>=0.53.0",
+]
+
+[tool.uv.build-backend]
+module-name = "mockservices"
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
