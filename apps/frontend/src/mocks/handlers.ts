@@ -5,11 +5,13 @@
  *
  * Same handlers in Vitest (msw/node, ./node.ts) and in the browser (`npm run dev:mock`, ./browser.ts).
  */
+import { interactionHandlers, resetInteractionMock } from './interaction'
 import { oidcHandlers, resetOidcMock } from './oidc'
 
-export const handlers = [...oidcHandlers]
+export const handlers = [...interactionHandlers, ...oidcHandlers]
 
 /** Forget used codes, logged-in interactions...: one test must not see the previous one's state. */
 export function resetMocks(): void {
+  resetInteractionMock()
   resetOidcMock()
 }
