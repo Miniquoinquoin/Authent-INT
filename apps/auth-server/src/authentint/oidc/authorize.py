@@ -19,6 +19,7 @@ from authentint.domain.errors import redirect_error
 from authentint.oidc.codes import issue_code
 from authentint.domain.scopes import grant
 from authentint.audit import audit
+from authentint.flows import consent as consents
 from authentint.flows import interaction
 
 
@@ -72,6 +73,13 @@ async def authorize(request: Request, session=Depends(get_session)):
 
     if granted != requested:
         await audit.emit(session, "authorize.scope_reduced", actor=user.id, outcome="success", detail={"requested": sorted(requested), "granted": sorted(granted)})
+
+    # ADR §10 step 9: a live session is not consent. Without this, any client requiring consent
+    # would get a code for a logged-in user who never agreed, just by sending them here.
+    if client.require_consent and not await consents.covers(session, user.id, client.id, granted):
+        it = await interaction.create(session, params, user_id=user.id)  # known user: the first step is consent
+
+        return RedirectResponse(f"{settings.public_base_url}/login?uid={it.uid}", 302)
 
     oauth_auth_code = await issue_code(session, params, sso, " ".join(sorted(granted)))
     redirect_url = f"{params.redirect_uri}{"&" if "?" in params.redirect_uri else "?"}{urlencode({"code": oauth_auth_code, "state": params.state})}"
