@@ -2,13 +2,13 @@
 # Référence : docs/architecture.md §1.
 #
 # Un seul port publié sur l'hôte : caddy:443.
-# Prérequis — dans /etc/hosts de la machine :
-#   127.0.0.1 auth.authentint.local app.authentint.local impots.authentint.local cadastre.authentint.local
+# Aucun prérequis sur la machine : les noms *.localhost résolvent nativement
+# vers 127.0.0.1 dans les navigateurs (RFC 6761), sans /etc/hosts.
 
 # Environnement commun à auth-server et à migrate (même image, même Settings).
 x-auth-env: &auth-env
-  ISSUER: https://auth.authentint.local
-  PUBLIC_BASE_URL: https://app.authentint.local
+  ISSUER: https://auth.authentint.localhost
+  PUBLIC_BASE_URL: https://app.authentint.localhost
   KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:?KEY_ENCRYPTION_KEY vide dans .env, voir .env.example}
   NUMERO_FISCAL_KEY: ${NUMERO_FISCAL_KEY:?NUMERO_FISCAL_KEY vide dans .env, voir .env.example}
   DATABASE_URL: postgresql+asyncpg://authentint_app:${POSTGRES_PASSWORD:-authentint}@postgres:5432/authentint
@@ -37,13 +37,13 @@ services:
     networks:
       edge:
         aliases: # même URL pour le navigateur et pour les conteneurs
-          - auth.authentint.local
-          - app.authentint.local
-          - impots.authentint.local
-          - cadastre.authentint.local
+          - auth.authentint.localhost
+          - app.authentint.localhost
+          - impots.authentint.localhost
+          - cadastre.authentint.localhost
     healthcheck:
       # Prêt quand la CA interne existe : les mocks en dépendent pour
-      # faire confiance au certificat d'auth.authentint.local.
+      # faire confiance au certificat d'auth.authentint.localhost.
       test: ["CMD", "test", "-f", "/data/caddy/pki/authorities/local/root.crt"]
       interval: 2s
       timeout: 2s
@@ -92,7 +92,7 @@ services:
     restart: unless-stopped
     environment:
       SERVICE_NAME: svc-impots
-      ISSUER: https://auth.authentint.local
+      ISSUER: https://auth.authentint.localhost
       AUDIENCE: svc-impots
       CA_BUNDLE: /caddy-data/caddy/pki/authorities/local/root.crt
     volumes:
@@ -113,7 +113,7 @@ services:
     restart: unless-stopped
     environment:
       SERVICE_NAME: svc-cadastre
-      ISSUER: https://auth.authentint.local
+      ISSUER: https://auth.authentint.localhost
       AUDIENCE: svc-cadastre
       CA_BUNDLE: /caddy-data/caddy/pki/authorities/local/root.crt
     volumes:

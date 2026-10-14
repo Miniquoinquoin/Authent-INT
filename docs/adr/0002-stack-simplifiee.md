@@ -226,7 +226,7 @@ Trois conséquences :
 2. **`auth-server` est le seul pont** entre les deux réseaux — et le seul
    composant qui devrait l'être.
 3. **Les alias DNS de `caddy` résolvent l'écueil de l'issuer.** `svc-impots`
-   appelle `https://auth.authentint.local/.well-known/jwks.json`, exactement
+   appelle `https://auth.authentint.localhost/.well-known/jwks.json`, exactement
    l'URL que voit le navigateur et exactement le claim `iss`. Sans alias, il
    appellerait `http://auth-server:8000/…` : URL différente, en clair, chemin
    TLS jamais exercé en dev.
@@ -260,13 +260,18 @@ cookies ignorent le port : le cookie SSO fuite entre tous les services, ça a
 l'air de marcher en local et ça casse dans le cluster.
 
 ```caddyfile
-auth.authentint.local   { tls internal; reverse_proxy auth-server:8000 }
-app.authentint.local    { tls internal; reverse_proxy frontend:80 }
-impots.authentint.local { tls internal; reverse_proxy svc-impots:8001 }
-cadastre.authentint.local { tls internal; reverse_proxy svc-cadastre:8001 }
+auth.authentint.localhost   { tls internal; reverse_proxy auth-server:8000 }
+app.authentint.localhost    { tls internal; reverse_proxy frontend:80 }
+impots.authentint.localhost { tls internal; reverse_proxy svc-impots:8001 }
+cadastre.authentint.localhost { tls internal; reverse_proxy svc-cadastre:8001 }
 ```
 
-Ajouter ces noms dans `/etc/hosts` vers `127.0.0.1`.
+Aucun `/etc/hosts` à éditer : `.localhost` est réservé au loopback
+(RFC 6761) et les navigateurs résolvent tout `*.localhost` vers `127.0.0.1`
+d'eux-mêmes. `.local` est écarté : il appartient au mDNS (RFC 6762) et
+imposait une ligne `/etc/hosts` sur chaque machine. Le parent commun
+`authentint.localhost` est voulu : `auth.` et `app.` restent le même *site*,
+donc le cookie de session `SameSite=Lax` posé par le login passe.
 
 **C'est un échafaudage de développement, pas de l'architecture.** Dans
 Kubernetes, l'Ingress Controller du client le remplace (§12). Ne pas y passer
@@ -486,7 +491,7 @@ correct selon la RFC 6749 ; journaliser chaque réduction.
 
 ```json
 {
-  "iss": "https://auth.authentint.local",
+  "iss": "https://auth.authentint.localhost",
   "sub": "9f1c...uuid",
   "aud": "portail-web",
   "exp": 1750000000,
@@ -708,7 +713,7 @@ En dev, `ConsoleMailer` écrit le lien dans les logs :
 
 ```
 [mail] to=marie.dupont@example.gouv.fr subject="Activation de votre compte"
-       link=https://app.authentint.local/activate?token=xY3...
+       link=https://app.authentint.localhost/activate?token=xY3...
 ```
 
 Interface `Mailer` avec une seule méthode ; `SmtpMailer` s'ajoute le jour où le
@@ -879,8 +884,8 @@ Un service ne devrait connaître **qu'une seule URL** : celle de l'émetteur.
 Tout le reste se découvre.
 
 ```
-1.  L'issuer est https://auth.authentint.local
-2.  GET https://auth.authentint.local/.well-known/openid-configuration
+1.  L'issuer est https://auth.authentint.localhost
+2.  GET https://auth.authentint.localhost/.well-known/openid-configuration
         → { "issuer": "...", "jwks_uri": "https://auth.../.well-known/jwks.json", ... }
 3.  GET <jwks_uri>
         → { "keys": [ { "kid": "2026-09-a", "kty": "RSA", "alg": "RS256",
@@ -902,7 +907,7 @@ claims = jwt.decode(
     key=jwks.find(header["kid"]),
     algorithms=["RS256"],        # ÉPINGLÉ. Jamais lu depuis le jeton.
 )
-assert claims["iss"] == "https://auth.authentint.local"
+assert claims["iss"] == "https://auth.authentint.localhost"
 assert "svc-impots" in claims["aud"]
 assert claims["exp"] > now()
 assert "svc:impots.read" in claims["scope"].split()

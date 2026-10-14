@@ -34,3 +34,9 @@ async def test_after_the_redirect_uri_check_errors_go_back_with_state(client, au
     r = await client.get("/authorize", params=authorize_params(**override))
     assert r.status_code == 302
     assert r.headers["location"] == "https://app.test/cb?error=invalid_request&state=st4te"
+
+async def test_a_garbage_session_cookie_is_no_session(client, authorize_params):
+    client.cookies.set("__Host-session", "not-a-uuid")
+    r = await client.get("/authorize", params=authorize_params())
+    assert r.status_code == 302  # not a 500: treated like no cookie at all
+    assert "/login?uid=" in r.headers["location"]

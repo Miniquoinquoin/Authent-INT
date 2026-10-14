@@ -29,7 +29,7 @@ tests/           unit (no DB) · integration · security — one rolled-back tra
 ## Running
 
 Everything runs through Docker Compose from the repo root — see the root README
-for the host setup (`/etc/hosts`, Caddy's CA).
+for the host setup (trusting Caddy's CA; `*.localhost` needs no `/etc/hosts`).
 
 ```sh
 cp .env.example .env   # then fill KEY_ENCRYPTION_KEY (command in the file)
@@ -54,7 +54,6 @@ with `--reload`, sets `DEV=true` and mounts the fake directory. Rebuild only whe
 ## Try it
 
 ```sh
-R="--resolve auth.authentint.local:443:127.0.0.1"   # unnecessary if /etc/hosts is set
-curl -sk $R https://auth.authentint.local/.well-known/openid-configuration
-curl -sk $R https://auth.authentint.local/.well-known/jwks.json
+curl -sk https://auth.authentint.localhost/.well-known/openid-configuration
+curl -sk https://auth.authentint.localhost/.well-known/jwks.json
 ```
