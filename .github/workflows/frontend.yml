@@ -1,0 +1,67 @@
+# B5 (ADR §17): the SPA is checked on its own, against its mocks — no stack needed.
+# Separate from ci.yml on purpose: other lanes edit that one.
+name: frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/frontend/**
+      - docs/generated/openapi.json
+      - .github/workflows/frontend.yml
+  pull_request:
+    paths:
+      - apps/frontend/**
+      - docs/generated/openapi.json
+      - .github/workflows/frontend.yml
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: The API types match docs/generated/openapi.json
+        run: |
+          npm run gen:api
+          git diff --exit-code src/api/types.ts || { echo "::error::run 'npm run gen:api' in apps/frontend and commit src/api/types.ts"; exit 1; }
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit and integration tests (Vitest + MSW)
+        run: npm test
+
+      - name: Build (tsc + vite)
+        run: npm run build
+        env:
+          # Without it the bundle is only the "VITE_AUTH_URL n'est pas défini" error (dead-code eliminated)
+          VITE_AUTH_URL: https://auth.authentint.localhost
+
+      - name: Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E journey against the mock (Playwright + MSW)
+        run: npm run test:e2e
+
+      - name: Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/frontend/playwright-report/
+            apps/frontend/test-results/
+          retention-days: 7
