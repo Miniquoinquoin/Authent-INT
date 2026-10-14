@@ -203,7 +203,7 @@ async def refresh_tokens(session: AsyncSession, client: OAuthClients, body: Refr
     return response
 
 @router.post("/token")
-async def exchange_code(body: Annotated[TokenBody | RefreshBody, Form()], credentials: HTTPBasicCredentials | None = Depends(HTTPBasic(auto_error=False)), session: AsyncSession = Depends(get_session)):
+async def issue_tokens(body: Annotated[TokenBody | RefreshBody, Form()], credentials: HTTPBasicCredentials | None = Depends(HTTPBasic(auto_error=False)), session: AsyncSession = Depends(get_session)):
     client = await authenticate_client(session, body.client_id, credentials, body.grant_type)
 
     if isinstance(body, TokenBody):

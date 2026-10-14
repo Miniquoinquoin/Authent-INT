@@ -64,8 +64,60 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Exchange Code */
-        post: operations["exchange_code_token_post"];
+        /** Issue Tokens */
+        post: operations["issue_tokens_token_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/userinfo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Userinfo */
+        get: operations["userinfo_userinfo_get"];
+        put?: never;
+        /** Userinfo */
+        post: operations["userinfo_userinfo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke */
+        post: operations["revoke_revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/end-session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** End Session */
+        get: operations["end_session_end_session_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -310,6 +362,20 @@ export interface components {
             /** Password */
             password: string;
         };
+        /** RefreshBody */
+        RefreshBody: {
+            /**
+             * Grant Type
+             * @constant
+             */
+            grant_type: "refresh_token";
+            /** Refresh Token */
+            refresh_token: string;
+            /** Client Id */
+            client_id: string;
+            /** Scope */
+            scope?: string | null;
+        };
         /** ResetConfirm */
         ResetConfirm: {
             /** Token */
@@ -321,6 +387,15 @@ export interface components {
         ResetRequest: {
             /** Numero Fiscal */
             numero_fiscal: string;
+        };
+        /** RevokeBody */
+        RevokeBody: {
+            /** Token */
+            token: string;
+            /** Token Type Hint */
+            token_type_hint?: string | null;
+            /** Client Id */
+            client_id: string;
         };
         /** TokenBody */
         TokenBody: {
@@ -420,7 +495,7 @@ export interface operations {
             };
         };
     };
-    exchange_code_token_post: {
+    issue_tokens_token_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -429,7 +504,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/x-www-form-urlencoded": components["schemas"]["TokenBody"];
+                "application/x-www-form-urlencoded": components["schemas"]["TokenBody"] | components["schemas"]["RefreshBody"];
             };
         };
         responses: {
@@ -449,6 +524,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    userinfo_userinfo_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    userinfo_userinfo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    revoke_revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["RevokeBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    end_session_end_session_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

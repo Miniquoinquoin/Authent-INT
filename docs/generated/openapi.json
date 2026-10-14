@@ -67,13 +67,21 @@
         "tags": [
           "oidc"
         ],
-        "summary": "Exchange Code",
-        "operationId": "exchange_code_token_post",
+        "summary": "Issue Tokens",
+        "operationId": "issue_tokens_token_post",
         "requestBody": {
           "content": {
             "application/x-www-form-urlencoded": {
               "schema": {
-                "$ref": "#/components/schemas/TokenBody"
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/TokenBody"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RefreshBody"
+                  }
+                ],
+                "title": "Body"
               }
             }
           },
@@ -104,6 +112,115 @@
             "HTTPBasic": []
           }
         ]
+      }
+    },
+    "/userinfo": {
+      "get": {
+        "tags": [
+          "oidc"
+        ],
+        "summary": "Userinfo",
+        "operationId": "userinfo_userinfo_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "oidc"
+        ],
+        "summary": "Userinfo",
+        "operationId": "userinfo_userinfo_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/revoke": {
+      "post": {
+        "tags": [
+          "oidc"
+        ],
+        "summary": "Revoke",
+        "operationId": "revoke_revoke_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ]
+      }
+    },
+    "/end-session": {
+      "get": {
+        "tags": [
+          "oidc"
+        ],
+        "summary": "End Session",
+        "operationId": "end_session_end_session_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
       }
     },
     "/account/activation/request": {
@@ -649,6 +766,44 @@
         ],
         "title": "LoginBody"
       },
+      "RefreshBody": {
+        "properties": {
+          "grant_type": {
+            "type": "string",
+            "const": "refresh_token",
+            "title": "Grant Type"
+          },
+          "refresh_token": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Refresh Token"
+          },
+          "client_id": {
+            "type": "string",
+            "title": "Client Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          }
+        },
+        "type": "object",
+        "required": [
+          "grant_type",
+          "refresh_token",
+          "client_id"
+        ],
+        "title": "RefreshBody"
+      },
       "ResetConfirm": {
         "properties": {
           "token": {
@@ -684,6 +839,37 @@
           "numero_fiscal"
         ],
         "title": "ResetRequest"
+      },
+      "RevokeBody": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Token"
+          },
+          "token_type_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Type Hint"
+          },
+          "client_id": {
+            "type": "string",
+            "title": "Client Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "client_id"
+        ],
+        "title": "RevokeBody"
       },
       "TokenBody": {
         "properties": {
