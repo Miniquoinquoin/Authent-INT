@@ -12,6 +12,7 @@ from httpx import ASGITransport
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from authentint.external.mailer import get_mailer
 from authentint.infra.database import engine
 from authentint.infra.database import get_session
 from authentint.infra.models.identity import Role
@@ -35,13 +36,27 @@ async def s():
             yield session
         await conn.rollback()
 
+class Mailbox:
+    """Stands in for the Mailer: keeps the e-mails instead of sending them."""
+
+    def __init__(self):
+        self.sent: list[dict] = []
+
+    async def send(self, to: str, subject: str, body: str) -> None:
+        self.sent.append({"to": to, "subject": subject, "body": body})
+
 @pytest.fixture
-def make_client(s):
+def mailbox() -> Mailbox:
+    return Mailbox()
+
+@pytest.fixture
+def make_client(s, mailbox):
     """A client seen by the server as coming from `ip` (one per simulated browser)."""
 
     def build(ip: str = "127.0.0.1") -> AsyncClient:
         app = create_app()
         app.dependency_overrides[get_session] = lambda: s  # the routes share the test's transaction
+        app.dependency_overrides[get_mailer] = lambda: mailbox  # e-mails land in `mailbox.sent`
         return AsyncClient(transport=ASGITransport(app=app, client=(ip, 51000)), base_url="https://auth.authentint.local")
 
     return build
@@ -72,6 +87,17 @@ async def alice(s) -> User:
     u = User(external_id="test-alice", numero_fiscal="1801234567890", email="alice@example.test",
              nom="Martin", prenom="Alice", password_hash=await hash_password(ALICE_PASSWORD),
              role=Role.contribuable, status=UserStatus.active)
+    s.add(u)
+    await s.flush()
+    return u
+
+@pytest.fixture
+async def bob(s) -> User:
+    """A contribuable imported from the directory, never activated: no password yet."""
+
+    u = User(external_id="test-bob", numero_fiscal="1807654321098", email="bob@example.test",
+             nom="Durand", prenom="Bob", password_hash=None,
+             role=Role.contribuable, status=UserStatus.pending_activation)
     s.add(u)
     await s.flush()
     return u

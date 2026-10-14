@@ -62,6 +62,50 @@
         }
       }
     },
+    "/account/activation/request": {
+      "post": {
+        "tags": [
+          "interaction",
+          "account"
+        ],
+        "summary": "Request Activation",
+        "description": "Always 202 with the same body: whether an e-mail left is never told.",
+        "operationId": "request_activation_account_activation_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/interaction/{uid}": {
       "get": {
         "tags": [
@@ -296,6 +340,20 @@
   },
   "components": {
     "schemas": {
+      "ActivationRequest": {
+        "properties": {
+          "numero_fiscal": {
+            "type": "string",
+            "pattern": "^\\d{13}$",
+            "title": "Numero Fiscal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "numero_fiscal"
+        ],
+        "title": "ActivationRequest"
+      },
       "ConsentBody": {
         "properties": {
           "approve": {
