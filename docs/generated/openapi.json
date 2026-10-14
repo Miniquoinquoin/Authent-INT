@@ -106,6 +106,50 @@
         }
       }
     },
+    "/account/activation/confirm": {
+      "post": {
+        "tags": [
+          "interaction",
+          "account"
+        ],
+        "summary": "Confirm Activation",
+        "description": "The link's token + the chosen password. The account becomes active.",
+        "operationId": "confirm_activation_account_activation_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivationConfirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown, expired or already used link (same answer for the three)"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/interaction/{uid}": {
       "get": {
         "tags": [
@@ -340,6 +384,28 @@
   },
   "components": {
     "schemas": {
+      "ActivationConfirm": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Token"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 12,
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "password"
+        ],
+        "title": "ActivationConfirm"
+      },
       "ActivationRequest": {
         "properties": {
           "numero_fiscal": {

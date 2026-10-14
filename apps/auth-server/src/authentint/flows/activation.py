@@ -23,6 +23,9 @@ from fastapi import HTTPException
 from fastapi import Request
 from pydantic import BaseModel
 from pydantic import Field
+from sqlalchemy import func
+from sqlalchemy import select
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import router
@@ -32,8 +35,10 @@ from authentint.external.mailer import Mailer
 from authentint.external.mailer import get_mailer
 from authentint.infra.database import get_session
 from authentint.infra.models.identity import ActivationTokens
+from authentint.infra.models.identity import User
 from authentint.infra.models.identity import UserStatus
 from authentint.security import ratelimit
+from authentint.security.passwords import hash_password
 from authentint.security.passwords import hash_token
 from authentint.users import queries as users
 
@@ -47,6 +52,10 @@ ACCEPTED = {"status": "accepted"}  # the ONE answer of /request, whatever happen
 
 class ActivationRequest(BaseModel):
     numero_fiscal: str = Field(pattern=r"^\d{13}$")
+
+class ActivationConfirm(BaseModel):
+    token: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=12, max_length=256)  # ANSSI: length, not composition rules (ADR §18 q.7)
 
 
 @router.post("/account/activation/request", status_code=202, tags=["account"], responses={
@@ -78,3 +87,31 @@ async def request_activation(body: ActivationRequest, request: Request, backgrou
                         f"Choisissez votre mot de passe : {settings.public_base_url}/activate?token={token}\n"
                         f"Ce lien expire dans {TTL.seconds // 60} minutes.")
     return ACCEPTED
+
+
+@router.post("/account/activation/confirm", tags=["account"], responses={
+    400: {"description": "Unknown, expired or already used link (same answer for the three)"},
+})
+async def confirm_activation(body: ActivationConfirm, session: AsyncSession = Depends(get_session)):
+    """The link's token + the chosen password. The account becomes active."""
+
+    # A link is valid only if: it exists (looked up by its hash), was never used, and has not expired
+    row = await session.scalar(select(ActivationTokens).where(ActivationTokens.token_hash == hash_token(body.token) ,ActivationTokens.consumed_at.is_(None), ActivationTokens.expires_at > func.now()))
+
+    if row is None:
+        raise HTTPException(400, "invalid_token")
+    user = await session.get(User, row.user_id)
+    if user.status != UserStatus.pending_activation:
+        raise HTTPException(400, "invalid_token")  # activated meanwhile: same answer, nothing to learn
+
+    user.password_hash = await hash_password(body.password)
+    user.status = UserStatus.active
+    user.password_changed_at = func.now()
+    # Use once: every outstanding link of this user dies now, not only the one clicked
+    await session.execute(update(ActivationTokens)
+                          .where(ActivationTokens.user_id == user.id, ActivationTokens.consumed_at.is_(None))
+                          .values(consumed_at=func.now()))
+    await audit.emit(session, "activation.confirmed", actor=user.id, outcome="success", detail={})
+    await session.commit()
+
+    return {"status": "activated"}
