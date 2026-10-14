@@ -64,9 +64,9 @@ scripts/seed.py (vide)                  scripts/seed.py      utilisateurs + clie
 | `get_user_by_username` dans `main.py` | `users/`, `clients/`, `sessions/` → `queries.py` | Chaque fonctionnalité possède ses requêtes. Une autre fonctionnalité peut importer ce `queries.py`, jamais ses routes. |
 | CORS `allow_origins=[PUBLIC_BASE_URL]` | **perdu** dans la réécriture de `main.py`, à remettre | Le frontend (`app.`) appelle `/token` sur `auth.` : c'est une autre origine, donc sans CORS le navigateur bloque la réponse. Liste blanche, jamais `*` (ADR §16). |
 | — | `domain/` | Les règles (scopes accordés par rôle, forme de l'ID token, trois façons de répondre une erreur OAuth) sont testables en une milliseconde, sans base ni réseau. |
-| — | `security/ratelimit.py` | Compteur atomique dans Postgres (`INSERT … ON CONFLICT … RETURNING`), partagé par tous les réplicas. **Échoue fermé** : si la base ne répond pas, on refuse. |
+| — | `security/ratelimit.py` | Compteur atomique dans Postgres (`INSERT … ON CONFLICT … RETURNING`), partagé par tous les réplicas. **Échoue fermé** : si la base ne répond pas, on refuse. Seaux : login par IP (10/min) **et** par compte (10/min, clé = HMAC du numéro fiscal, partagé avec `/me/password`), `/token` par IP (30/min → `429` + `Retry-After`, RFC 6585 §4 : RFC 6749 §5.2 n'a pas de code pour ça). Les seaux expirés sont purgés paresseusement (1 appel sur 100, ADR §8). |
 | — | `external/` | Un `Protocol` par système extérieur (`UserDirectory`, `Mailer`). Le JSON deviendra un LDAP, la console un SMTP, sans toucher au code métier. |
-| — | `audit/` | `emit()` refuse tout `detail` contenant un secret ; le middleware pose un `request_id` pour corréler une requête à travers les logs. La table est append-only au niveau SQL (migration). |
+| — | `audit/` | `emit()` refuse tout `detail` contenant un secret ; le middleware pose un `request_id` pour corréler une requête à travers les logs. La table est append-only au niveau des privilèges : `auth-server` se connecte en `authentint_app` (ni superutilisateur ni propriétaire, `SELECT`/`INSERT` seulement sur `audit_events`) ; `migrate` en `authentint_owner` (migration `3c1e7a2b9d04`, `tests/security/test_audit_append_only.py`). Un volume créé avant ce changement : `docker compose down -v` une fois. |
 | `infra/` = connexion + modèles | inchangé, et **seulement** ça | Règle du learning plan : dès qu'un fichier *fait* quelque chose avec la base (requête, verrou, compteur), il appartient à la fonctionnalité qui en a besoin. |
 
 Dépendances : `bcrypt` → `argon2-cffi`, `python-jose` → `joserfc`, ajout de
@@ -216,7 +216,6 @@ annulée par test.
 | Sujet | Question |
 | --- | --- |
 | `keys/routes.py` | `/admin/keys/rotate` est protégé par `svc:admin.users` : faut-il un scope `svc:admin.keys` ? |
-| **`audit_events` n'est PAS append-only** ⚠️ | `authentint_app` est le `POSTGRES_USER` de l'image : **superutilisateur**, donc le `REVOKE UPDATE, DELETE` de la migration ne s'applique pas (vérifié : un `DELETE` passe). Invariant 10 non tenu. Correctif : un rôle propriétaire pour `migrate`, un rôle applicatif sans `UPDATE`/`DELETE` sur l'audit pour `auth-server`. C'est le « fini quand » de **B4**. |
 
 **Tranché :** `svc:cadastre.write` n'est accordé à **aucun** rôle, conformément
 à [architecture.md §9](architecture.md#9-rôles-et-scopes). Un admin gère des
@@ -247,13 +246,14 @@ la source. À confirmer avec le client ([ADR §18](adr/0002-stack-simplifiee.md#
 | `oidc/` discovery · jwks | fait, testé |
 | `oidc/authorize.py` | vérifications 1-7 faites et testées ; chemin SSO → `issue_code` (stub, B2) |
 | `flows/interaction.py` | fait (B1) : `login` (temps constant, verrouillage, rate limit, cookie `__Host-`, audit) · `consent` (mémorisé par utilisateur et client) |
-| `ops/` | `/health/live`, `/health/ready` ; `/metrics` manquant (B6) |
+| `ops/` | `/health/live`, `/health/ready`, `/metrics` (labels = gabarits de route ; 404 côté Caddy) — B6 |
 | `oidc/` codes · token · userinfo · revoke · end_session | B2 |
 | `flows/` activation · reset | fait (B1) : lien aléatoire stocké haché, usage unique, réponse identique ; le reset ferme toutes les sessions |
 | `users/` · `sessions/` queries | fait (B1) : `by_numero_fiscal` (par HMAC), `sessions.create` |
-| routes `/me` · `/admin` | B4 |
+| routes `/me` · `/admin` | fait (B4) : `GET /me`, `POST /me/password`, `GET` · `DELETE /me/sessions`, `GET /me/audit` (audience `authentint`) ; `/admin/users` (+ `lock`, `unlock`, `resend-activation`), `/admin/clients`, `/admin/sessions` (`svc:admin.users`) ; `/admin/audit` + export CSV plafonné à 10 000 lignes (`svc:admin.audit`). Audit append-only au niveau des privilèges (rôle `authentint_app`) ; `audit.emit` remplit `client_id` et `session_id`. |
 | `apps/mock-services/` | stub qui répond 200 à tout (B3) |
 | frontend | écran de login de démonstration (B5) |
+| B6 · Ops | fait : `/metrics`, images multi-stage (runtime non-root), cache de la clé de signature déchiffrée (`keystore._private_key`), k6 (`load/k6.js`, `docs/load-report.md`), contrôle à 3 réplicas (`scripts/check_scale.sh`), audits de dépendances en CI (`.github/workflows/audit.yml`), modèle de menaces (`docs/threat-model.md`). Kubernetes/Helm hors périmètre (stack compose d'équipe). |
 
 ---
 
@@ -288,7 +288,7 @@ disparaissent aux *seams*, à deux personnes. Détail et justification :
 
 - Une branche par couloir et par sujet, nommée `b1/login`, `b2/token`… PR vers
   `main`, CI verte obligatoire.
-- `make up` · `make test` · `make seed` · `make openapi` — rien d'autre à
+- `make up` · `make test` · `make seed` · `make openapi` (charge : `make seed N=400` puis `make load`, `make load-scale3`, `make scale3-check` — voir `docs/load-report.md`) — rien d'autre à
   connaître pour démarrer ([README de l'auth-server](../apps/auth-server/README.md)).
 - Un invariant de [architecture.md §15](architecture.md#15-invariants) = un
   test dans `tests/security/`, écrit **avant** le code qui le respecte.

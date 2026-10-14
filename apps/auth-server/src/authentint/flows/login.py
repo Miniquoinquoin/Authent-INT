@@ -29,6 +29,17 @@ DUMMY_HASH = pwd_hasher.hash(secrets.token_urlsafe(32))
 MAX_FAILURES = 5                  # wrong passwords in a row before the account locks (architecture.md §4)
 LOCKOUT = timedelta(minutes=15)   # how long it stays locked
 
+# ADR §16 "par IP et par compte": attempts per account, from any IP. Above MAX_FAILURES so the lockout
+# (and its 423) still comes first; this caps what a botnet spends hammering a locked account.
+ACCOUNT_LIMIT = 10
+ACCOUNT_WINDOW = timedelta(minutes=1)
+
+
+def account_bucket(numero_fiscal_hmac: str) -> str:
+    """The per-account bucket: keyed by the HMAC, the numero fiscal itself is never stored (ADR §8)."""
+
+    return f"login:account:{numero_fiscal_hmac}"
+
 
 class AccountLocked(Exception):
     """Too many failures, or locked by an admin: answered 423 whatever the password."""

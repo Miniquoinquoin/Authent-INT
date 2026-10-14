@@ -4,10 +4,11 @@ from uuid import UUID
 from authentint.infra.models.identity import Role
 
 
-class IdToken(BaseModel):
+class RefreshedIdToken(BaseModel):
     """
-    Defines a Pydantic model for the ID Token (who / when / why) so that no token with missing attributes can be provided.
-    The attributes follow the OIDC spec.
+    The ID token re-issued by the refresh_token grant: every IdToken claim but `nonce`.
+    OIDC Core §12.2: the refresh request carries no nonce, so there is none to echo. A separate model,
+    rather than an optional field, keeps IdToken strict: a code-flow ID token still can't lose its nonce.
     """
 
     iss: str
@@ -16,7 +17,6 @@ class IdToken(BaseModel):
     exp: int
     iat: int
     auth_time: int
-    nonce: str
     acr: str
     amr: list[str]
     sid: UUID
@@ -24,6 +24,16 @@ class IdToken(BaseModel):
     given_name: str
     family_name: str
     role: Role
+    at_hash: str  # OIDC Core §3.1.3.6: binds this ID token to the access token issued with it
+
+
+class IdToken(RefreshedIdToken):
+    """
+    Defines a Pydantic model for the ID Token (who / when / why) so that no token with missing attributes can be provided.
+    The attributes follow the OIDC spec.
+    """
+
+    nonce: str
 
 
 class AccessToken(BaseModel):

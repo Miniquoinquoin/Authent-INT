@@ -29,11 +29,21 @@ async def test_unknown_client_never_redirects(client, authorize_params):
     {"response_type": "token"},  # implicit flow
     {"scope": "svc:impots.read"},  # no openid
     {"nonce": None},
+    {"nonce": ""},
+    {"nonce": "n" * 2000},
+    {"code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-c"},  # 42 chars
+    {"code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-c+"},  # not base64url
+    {"scope": "openid " + "x" * 1100},
 ])
 async def test_after_the_redirect_uri_check_errors_go_back_with_state(client, authorize_params, override):
     r = await client.get("/authorize", params=authorize_params(**override))
     assert r.status_code == 302
     assert r.headers["location"] == "https://app.test/cb?error=invalid_request&state=st4te"
+
+async def test_an_empty_state_is_an_invalid_request(client, authorize_params):
+    r = await client.get("/authorize", params=authorize_params(state=""))
+    assert r.status_code == 302
+    assert r.headers["location"] == "https://app.test/cb?error=invalid_request&state="
 
 async def test_a_garbage_session_cookie_is_no_session(client, authorize_params):
     client.cookies.set("__Host-session", "not-a-uuid")

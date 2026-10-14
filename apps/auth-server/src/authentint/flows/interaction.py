@@ -36,14 +36,19 @@ from authentint.clients import queries as clients
 from authentint.domain.scopes import grant
 from authentint.domain.errors import error_url
 from authentint.flows import consent as consents
+from authentint.flows.login import ACCOUNT_LIMIT
+from authentint.flows.login import ACCOUNT_WINDOW
 from authentint.flows.login import AccountLocked
+from authentint.flows.login import account_bucket
 from authentint.flows.login import authenticate
 from authentint.infra.database import get_session
 from authentint.sessions import queries as sessions
 from authentint.infra.models.identity import User
 from authentint.infra.models.oauth import OAuthClients
 from authentint.infra.models.oauth import OAuthInteractions
+from authentint.ops.metrics import LOGINS
 from authentint.security import ratelimit
+from authentint.security.identifiers import numero_fiscal_digest
 
 
 TTL = timedelta(minutes=10)
@@ -149,25 +154,33 @@ async def login(uid: str, body: LoginBody, request: Request, response: Response,
 
     # First, before any Argon2 work: one source cannot try more than LOGIN_LIMIT times per LOGIN_WINDOW
     ip = request.client.host if request.client else "unknown"
-    if not await ratelimit.hit(session, f"login:ip:{ip}", LOGIN_LIMIT, LOGIN_WINDOW):
+    # ...and one account cannot be tried more than ACCOUNT_LIMIT times, from however many IPs.
+    # Unknown numeros get a bucket too: the answer never tells whether the account exists
+    ok = (await ratelimit.hit(session, f"login:ip:{ip}", LOGIN_LIMIT, LOGIN_WINDOW)
+          and await ratelimit.hit(session, account_bucket(numero_fiscal_digest(body.numero_fiscal)), ACCOUNT_LIMIT, ACCOUNT_WINDOW))
+    await session.commit()  # the counters must survive whatever happens next (429, 401, 423, 404...)
+    if not ok:
+        LOGINS.labels("rate_limited").inc()
         raise HTTPException(429, "too_many_attempts")
-    await session.commit()  # the counter must survive whatever happens next (401, 423, 404...)
 
     it = await load(session, uid)
     try:
         user = await authenticate(session, body.numero_fiscal, body.password)
     except AccountLocked:
         await session.commit()  # keep the login.locked audit event
+        LOGINS.labels("locked").inc()
         raise HTTPException(423, "account_locked")
 
     if user is None:
         await session.commit()  # keep the failure count (lockout)
+        LOGINS.labels("failure").inc()
         raise HTTPException(401, "invalid_credentials")
 
     sso = await sessions.create(session, user, request)
     it.user_id = user.id
-    await audit.emit(session, "login.success", actor=user.id, outcome="success", detail={"sid": str(sso.id)})
+    await audit.emit(session, "login.success", actor=user.id, outcome="success", detail={}, session_id=sso.id)
     await session.commit()  # session + interaction + audit, together
+    LOGINS.labels("success").inc()
 
     response.set_cookie("__Host-session", str(sso.id), httponly=True, secure=True, samesite="lax", path="/")
 
@@ -189,14 +202,14 @@ async def consent(uid: str, body: ConsentBody, session: AsyncSession = Depends(g
 
     if not body.approve:
         it.expires_at = func.now()  # the flow is over: this uid can't be replayed (DB clock, like load())
-        await audit.emit(session, "consent.denied", actor=it.user_id, outcome="failure", detail={"client_id": it.client_id})
+        await audit.emit(session, "consent.denied", actor=it.user_id, outcome="failure", detail={}, client_id=it.client_id)
         await session.commit()
         return InteractionView(prompt=None, client_name=client.name, scopes=scopes,
                                redirect_to=error_url(it.redirect_uri, "access_denied", it.state))
 
     await consents.record(session, it.user_id, it.client_id, set(scopes))
     await audit.emit(session, "consent.granted", actor=it.user_id, outcome="success",
-                     detail={"client_id": it.client_id, "scopes": scopes})
+                     detail={"scopes": scopes}, client_id=it.client_id)
     await session.commit()
 
     return await view(session, it)

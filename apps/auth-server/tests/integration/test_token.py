@@ -11,6 +11,7 @@ from conftest import VERIFIER
 from authentint.config import settings
 from authentint.infra.models.oauth import OAuthRefreshTokens
 from authentint.keys import keystore
+from authentint.oidc.token import at_hash
 from authentint.security.bearer import verify_access_token
 
 
@@ -40,7 +41,7 @@ async def test_a_code_becomes_signed_tokens(client, s, authorize_params, make_us
     access = await verify_access_token(s, body["access_token"])  # exactly what the Resource Servers will check
     assert access["sub"] == str(user.id)
     assert access["scope"] == "openid svc:impots.read"
-    assert access["aud"] == ["svc-impots"]
+    assert access["aud"] == ["authentint", "svc-impots"]
 
     keys = KeySet.import_key_set(await keystore.jwks(s))
     id_token = jwt.decode(body["id_token"], keys, algorithms=["RS256"]).claims
@@ -49,6 +50,7 @@ async def test_a_code_becomes_signed_tokens(client, s, authorize_params, make_us
     assert id_token["sub"] == str(user.id)
     assert id_token["sid"] == str(sso.id)
     assert id_token["nonce"] == "n0nce"
+    assert id_token["at_hash"] == at_hash(body["access_token"])  # OIDC Core §3.1.3.6
 
     # signed, not encrypted: anyone holding a token reads it, so no personal identifier in it
     assert user.numero_fiscal not in str(access) + str(id_token)
@@ -89,3 +91,7 @@ async def test_a_replayed_code_revokes_what_it_issued(client, s, wide_spa, autho
     # ADR §10.3: a replayed code means it leaked, so what it produced is revoked
     refresh = (await s.scalars(select(OAuthRefreshTokens).where(OAuthRefreshTokens.client_id == wide_spa.id))).all()
     assert refresh and all(r.revoked_at is not None and r.revocation_reason == "code_replay" for r in refresh)
+
+def test_at_hash_is_the_left_half_of_sha256_base64url():
+    # OIDC Core §3.1.3.6, computed by hand: SHA-256("abc") starts ba7816bf8f01cfea414140de5dae2223
+    assert at_hash("abc") == "ungWv48Bz-pBQUDeXa4iIw"

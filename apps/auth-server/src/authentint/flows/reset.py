@@ -30,13 +30,14 @@ from authentint.config import settings
 from authentint.external.mailer import Mailer
 from authentint.external.mailer import get_mailer
 from authentint.infra.database import get_session
-from authentint.infra.models.audit import Sessions
 from authentint.infra.models.identity import PasswordResetTokens
 from authentint.infra.models.identity import User
 from authentint.infra.models.identity import UserStatus
 from authentint.security import ratelimit
+from authentint.security.passwords import NewPassword
 from authentint.security.passwords import hash_password
 from authentint.security.passwords import hash_token
+from authentint.sessions import queries as sessions
 from authentint.users import queries as users
 
 
@@ -52,7 +53,7 @@ class ResetRequest(BaseModel):
 
 class ResetConfirm(BaseModel):
     token: str = Field(min_length=1, max_length=128)
-    password: str = Field(min_length=12, max_length=256)
+    password: NewPassword
 
 
 @router.post("/account/password-reset/request", status_code=202, tags=["account"], responses={
@@ -105,10 +106,8 @@ async def confirm_reset(body: ResetConfirm, session: AsyncSession = Depends(get_
                           .where(PasswordResetTokens.user_id == user.id, PasswordResetTokens.consumed_at.is_(None))
                           .values(consumed_at=func.now()))
 
-    # Whoever logged in with the old password is logged out now: revoke every open session of this user
-    await session.execute(update(Sessions)
-                          .where(Sessions.user_id == user.id, Sessions.revoked_at.is_(None))
-                          .values(revoked_at=func.now(), revocation_reason="password_reset"))
+    # Whoever logged in with the old password is logged out now: every session of this user, and its refresh tokens
+    await sessions.revoke_all(session, user.id, "password_reset")
 
     await audit.emit(session, "password_reset.confirmed", actor=user.id, outcome="success", detail={})
     await session.commit()

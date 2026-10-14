@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from pydantic import Field
 from pydantic import ValidationError
 from pydantic import field_validator
 from fastapi import Request
@@ -27,10 +28,11 @@ class AuthorizeParams(BaseModel):
     response_type: Literal["code"]
     client_id: str
     redirect_uri: str
-    scope: str
-    state: str
-    nonce: str
-    code_challenge: str
+    # Bounded: state and nonce are stored in interactions and echoed back, a megabyte of either is not a request
+    scope: str = Field(max_length=1024)
+    state: str = Field(min_length=1, max_length=512)
+    nonce: str = Field(min_length=1, max_length=512)
+    code_challenge: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")  # RFC 7636 §4.2: BASE64URL(SHA256) is always 43 chars
     code_challenge_method: Literal["S256"]
 
     @field_validator("scope")
@@ -66,13 +68,14 @@ async def authorize(request: Request, session=Depends(get_session)):
     user = await session.get(User, sso.user_id)
 
     if user is None or user.status != UserStatus.active:
-        return redirect_error(query["redirect_uri"], "access_denied", query.get("state"))
+        return redirect_error(params.redirect_uri, "access_denied", params.state)
 
     requested = set(params.scope.split())
     granted = grant(requested, user.role, client)
 
     if granted != requested:
-        await audit.emit(session, "authorize.scope_reduced", actor=user.id, outcome="success", detail={"requested": sorted(requested), "granted": sorted(granted)})
+        await audit.emit(session, "authorize.scope_reduced", actor=user.id, outcome="success", detail={"requested": sorted(requested), "granted": sorted(granted)},
+                         client_id=client.id, session_id=sso.id)
 
     # ADR §10 step 9: a live session is not consent. Without this, any client requiring consent
     # would get a code for a logged-in user who never agreed, just by sending them here.

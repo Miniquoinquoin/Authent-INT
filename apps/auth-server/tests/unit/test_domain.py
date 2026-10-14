@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from authentint.domain.claims import AccessToken
 from authentint.domain.claims import IdToken
+from authentint.domain.claims import RefreshedIdToken
 from authentint.domain.errors import redirect_error
 from authentint.domain.scopes import ALLOWED
 from authentint.domain.scopes import audiences
@@ -38,14 +39,21 @@ def test_nobody_edits_the_cadastre_until_the_client_decides():
     # ADR §18 q.12: change this test together with ALLOWED once the client answers
     assert not any("svc:cadastre.write" in scopes for scopes in ALLOWED.values())
 
-def test_one_audience_per_service():
-    assert audiences({"openid", "svc:impots.read", "svc:impots.write", "svc:cadastre.read"}) == ["svc-cadastre", "svc-impots"]
+def test_one_audience_per_service_plus_the_idp_for_openid():
+    assert audiences({"openid", "svc:impots.read", "svc:impots.write", "svc:cadastre.read"}) == ["authentint", "svc-cadastre", "svc-impots"]
+
+def test_without_openid_the_idp_is_not_an_audience():
+    assert audiences({"svc:impots.read"}) == ["svc-impots"]
 
 
 def test_an_id_token_cannot_be_built_without_nonce():
     with pytest.raises(ValidationError):
         IdToken(iss="i", sub=uuid4(), aud="a", exp=1, iat=1, auth_time=1, acr="x", amr=["pwd"], sid=uuid4(),
-                name="n", given_name="g", family_name="f", role=Role.agent)
+                name="n", given_name="g", family_name="f", role=Role.agent, at_hash="h")
+
+def test_only_a_refreshed_id_token_goes_without_nonce():
+    # OIDC Core §12.2: the refresh request has no nonce to echo
+    assert "nonce" not in RefreshedIdToken.model_fields
 
 def test_the_access_token_carries_no_role_nor_personal_data():
     # Resource Servers authorise on scope only (invariant 12); they never learn who the user is

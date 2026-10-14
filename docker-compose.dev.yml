@@ -6,6 +6,8 @@ services:
       - ./apps/auth-server/alembic:/app/alembic # new migrations apply without a rebuild
 
   auth-server:
+    build:
+      target: dev # + pytest/httpx, root (Dockerfile): `make test` runs here
     command: ["uv", "run", "--no-sync", "uvicorn", "authentint.main:app",
               "--host", "0.0.0.0", "--port", "8000", "--reload"]
     environment:

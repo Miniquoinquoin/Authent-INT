@@ -12,6 +12,8 @@ import time
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
+from urllib.parse import parse_qs
+from urllib.parse import urlsplit
 from uuid import UUID
 from uuid import uuid4
 
@@ -140,11 +142,11 @@ VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 
 @pytest.fixture
 async def wide_spa(s) -> OAuthClients:
-    """A client allowing every scope: only the user's role can reduce what is granted."""
+    """A client allowing every scope and grant: only the user's role can reduce what is granted."""
 
     c = OAuthClients(id="wide-spa", name="Wide SPA", type=ClientType.public, secret_hash=None,
                      redirect_uris=["https://app.test/cb"], post_logout_redirect_uris=[],
-                     allowed_grants=["authorization_code"], allowed_scopes=sorted(OIDC_SCOPES.union(*ALLOWED.values())),
+                     allowed_grants=["authorization_code", "refresh_token"], allowed_scopes=sorted(OIDC_SCOPES.union(*ALLOWED.values())),
                      require_consent=False)
     s.add(c)
     await s.flush()
@@ -189,5 +191,19 @@ def access_token(s):
                              scope=scope, exp=now + 60, iat=now, jti=secrets.token_urlsafe(8), sid=sid or uuid4(),
                              acr="urn:authentint:acr:pwd")
         return sign(claims.model_dump(mode="json"), await keystore.active(s), typ="at+jwt")
+
+    return build
+
+@pytest.fixture
+def offline_tokens(client, authorize_params, wide_spa):
+    """/authorize + /token with offline_access for wide_spa: the caller logs the user in first (login_as)."""
+
+    async def build() -> dict:
+        r = await client.get("/authorize", params=authorize_params(client_id=wide_spa.id, scope="openid offline_access svc:impots.read"))
+        code = parse_qs(urlsplit(r.headers["location"]).query)["code"][0]
+        r = await client.post("/token", data={"grant_type": "authorization_code", "code": code, "redirect_uri": "https://app.test/cb",
+                                              "client_id": wide_spa.id, "code_verifier": VERIFIER})
+        assert r.status_code == 200
+        return r.json()
 
     return build

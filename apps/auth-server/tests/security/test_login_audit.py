@@ -34,7 +34,7 @@ async def test_success_is_recorded_with_the_session(client, s, since, authorize_
     r = await login(client, authorize_params, alice.numero_fiscal, alice_password)
     [event] = await events(s, since, "login.success")
     assert event.actor_user_id == alice.id
-    assert event.detail["sid"]  # which session: lets /me/sessions and the audit point at each other
+    assert event.session_id is not None  # which session: lets /me/sessions and the audit point at each other
     assert event.request_id == r.headers["x-request-id"]  # one id joins this row to the request's logs
 
 async def test_wrong_password_is_recorded_against_the_account(client, s, since, authorize_params, alice):
