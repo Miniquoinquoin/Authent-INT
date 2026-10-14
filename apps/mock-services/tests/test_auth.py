@@ -31,7 +31,7 @@ async def client(jwks):
     async def protected(claims: Annotated[dict, Depends(require_scope("svc:impots.read"))]):
         return {"sub": claims["sub"]}
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://impots.authentint.local") as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://impots.authentint.localhost") as c:
         yield c
 
 

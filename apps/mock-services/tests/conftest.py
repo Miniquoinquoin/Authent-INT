@@ -17,7 +17,7 @@ from joserfc.jwk import RSAKey
 from mockservices.jwks import JwksClient
 
 
-ISSUER = "https://auth.authentint.local"
+ISSUER = "https://auth.authentint.localhost"
 JWKS_URI = f"{ISSUER}/.well-known/jwks.json"
 
 

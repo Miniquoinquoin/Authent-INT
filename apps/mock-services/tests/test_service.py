@@ -17,7 +17,7 @@ async def service(jwks):
 
     def build(audience: str) -> AsyncClient:
         app = create_app(Settings(service_name=audience, issuer=ISSUER, audience=audience), jwks=jwks)
-        client = AsyncClient(transport=ASGITransport(app=app), base_url=f"https://{audience}.authentint.local")
+        client = AsyncClient(transport=ASGITransport(app=app), base_url=f"https://{audience}.authentint.localhost")
         clients.append(client)
         return client
 

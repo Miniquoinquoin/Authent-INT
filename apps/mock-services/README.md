@@ -85,11 +85,11 @@ With the stack up (`make up`) and a real access token from the auth-server's
 docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt
 
 TOKEN=...   # the access_token returned by /token
-curl --cacert caddy-root.crt -H "Authorization: Bearer $TOKEN" https://impots.authentint.local/dossiers
-curl --cacert caddy-root.crt -i https://impots.authentint.local/dossiers                 # 401
+curl --cacert caddy-root.crt -H "Authorization: Bearer $TOKEN" https://impots.authentint.localhost/dossiers
+curl --cacert caddy-root.crt -i https://impots.authentint.localhost/dossiers                 # 401
 curl --cacert caddy-root.crt -i -H "Authorization: Bearer $TOKEN" \
      -X PATCH -H 'Content-Type: application/json' -d '{"nature": "bati"}' \
-     https://cadastre.authentint.local/parcelles/AB-0012       # agent/admin: 403 · contribuable: 401 (aud)
+     https://cadastre.authentint.localhost/parcelles/AB-0012       # agent/admin: 403 · contribuable: 401 (aud)
 ```
 
 The three demonstrations of ADR §11: paste the token in a decoder (the claims
