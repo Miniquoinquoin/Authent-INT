@@ -12,6 +12,8 @@ import time
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
+from urllib.parse import parse_qs
+from urllib.parse import urlsplit
 from uuid import UUID
 from uuid import uuid4
 
@@ -189,5 +191,19 @@ def access_token(s):
                              scope=scope, exp=now + 60, iat=now, jti=secrets.token_urlsafe(8), sid=sid or uuid4(),
                              acr="urn:authentint:acr:pwd")
         return sign(claims.model_dump(mode="json"), await keystore.active(s), typ="at+jwt")
+
+    return build
+
+@pytest.fixture
+def offline_tokens(client, authorize_params, wide_spa):
+    """/authorize + /token with offline_access for wide_spa: the caller logs the user in first (login_as)."""
+
+    async def build() -> dict:
+        r = await client.get("/authorize", params=authorize_params(client_id=wide_spa.id, scope="openid offline_access svc:impots.read"))
+        code = parse_qs(urlsplit(r.headers["location"]).query)["code"][0]
+        r = await client.post("/token", data={"grant_type": "authorization_code", "code": code, "redirect_uri": "https://app.test/cb",
+                                              "client_id": wide_spa.id, "code_verifier": VERIFIER})
+        assert r.status_code == 200
+        return r.json()
 
     return build

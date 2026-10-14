@@ -33,8 +33,8 @@ async def oauth_error_handler(request, err: OAuthError):
     return JSONResponse({"error": err.error}, status_code=400)
 
 async def token_validation_handler(request, exc) -> JSONResponse:
-    # Every route othen than /token goes to FastAPI's default handler (keeping their 422)
-    if request.url.path != "/token":
+    # Every route other than /token and /revoke (RFC 7009 §2.2.1 reuses §5.2) goes to FastAPI's default handler (keeping their 422)
+    if request.url.path not in ("/token", "/revoke"):
         return await request_validation_exception_handler(request, exc)
 
     code = "invalid_request"
