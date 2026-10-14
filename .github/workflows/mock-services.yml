@@ -1,0 +1,39 @@
+# B3 (ADR §17): the Resource Servers' tests need no stack, no Postgres, no network:
+# the issuer is faked in-process (seam S2). Fast feedback, separate from ci.yml.
+name: mock-services
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/mock-services/**"
+      - ".github/workflows/mock-services.yml"
+  pull_request:
+    paths:
+      - "apps/mock-services/**"
+      - ".github/workflows/mock-services.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/mock-services
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.1" # same uv as the Dockerfiles
+          enable-cache: true
+          cache-dependency-glob: apps/mock-services/uv.lock
+
+      - name: Install (fails if uv.lock is out of date)
+        run: uv sync --locked
+
+      - name: pytest
+        run: uv run pytest

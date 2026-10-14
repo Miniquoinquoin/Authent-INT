@@ -101,6 +101,12 @@ services:
     depends_on:
       caddy:
         condition: service_healthy
+    healthcheck:
+      # live, not ready: the mock must stay up while auth-server boots (it retries the JWKS itself)
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health/live')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   svc-cadastre:
     build: ./apps/mock-services # même image, AUDIENCE différente
@@ -116,6 +122,11 @@ services:
     depends_on:
       caddy:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health/live')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   postgres:
     image: postgres:16-alpine

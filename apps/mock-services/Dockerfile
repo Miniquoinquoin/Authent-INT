@@ -1,39 +1,19 @@
 # syntax=docker/dockerfile:1
 #
-# STUB — à remplacer par les vrais Resource Servers (docs/architecture.md §3).
-# Il existe uniquement pour que `docker compose up` démarre et que le routage
-# Caddy + TLS soit vérifiable dès aujourd'hui. Répond 200 sur tout.
-FROM python:3.13-alpine
+# One image for every mock Resource Server: SERVICE_NAME, ISSUER, AUDIENCE and
+# CA_BUNDLE come from the environment (docker-compose.yml, docs/architecture.md §3).
 
-ENV SERVICE_NAME=svc-impots \
-    PORT=8001
+FROM python:3.13-slim
+COPY --from=ghcr.io/astral-sh/uv:0.12.1 /uv /uvx /bin/
 
-COPY <<'PY' /app/stub.py
-import json
-import os
-from http.server import BaseHTTPRequestHandler, HTTPServer
+WORKDIR /app
 
-SERVICE = os.environ.get("SERVICE_NAME", "service")
-PORT = int(os.environ.get("PORT", "8000"))
+COPY pyproject.toml uv.lock ./
+# Separating dependencies from project files to prevent useless Docker rebuilds
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-install-project --no-dev
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev
 
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        body = json.dumps(
-            {"service": SERVICE, "path": self.path, "stub": True}
-        ).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, fmt, *args):
-        print(f"{SERVICE} {fmt % args}", flush=True)
-
-
-HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
-PY
-
+ENV PORT=8001
 EXPOSE 8001
-CMD ["python", "-u", "/app/stub.py"]
+CMD ["sh", "-c", "exec uv run --no-sync uvicorn --factory mockservices.main:create_app --host 0.0.0.0 --port \"$PORT\""]
