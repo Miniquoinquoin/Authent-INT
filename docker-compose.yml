@@ -24,6 +24,7 @@ networks:
 
 volumes:
   caddy_data: # CA interne + certificats, générés par Caddy
+  caddy_ca: # le certificat RACINE seul (public), copié par ca-export
   pg_data: # données Postgres
 
 services:
@@ -50,6 +51,20 @@ services:
       timeout: 2s
       retries: 30
 
+  # One-shot: publishes Caddy's root CERTIFICATE alone, world-readable, in caddy_ca. The mocks
+  # mount that instead of caddy_data, which holds the CA's private keys (root.key, mode 0600):
+  # they run non-root (uid 10001) and must neither need nor see those keys.
+  ca-export:
+    image: caddy:2-alpine
+    command: ["install", "-m", "0644", "/data/caddy/pki/authorities/local/root.crt", "/ca/root.crt"]
+    volumes:
+      - caddy_data:/data:ro
+      - caddy_ca:/ca
+    network_mode: none
+    depends_on:
+      caddy:
+        condition: service_healthy
+
   frontend:
     build: ./apps/frontend
     restart: unless-stopped
@@ -59,8 +74,10 @@ services:
   # réussite. En Kubernetes, le même rôle est tenu par un Job (§12) : un seul
   # processus migre, jamais trois réplicas en même temps.
   migrate:
-    build: ./apps/auth-server
-    command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
+    build:
+      context: ./apps/auth-server
+      target: runtime # same Dockerfile as auth-server: alembic is a runtime dependency
+    command: ["alembic", "upgrade", "head"]
     environment:
       <<: *auth-env
       # The owner migrates (DDL, grants); it also creates authentint_app with this password
@@ -71,8 +88,11 @@ services:
       postgres:
         condition: service_healthy
 
+  # No container_name, no published port: `docker compose up --scale auth-server=3` works (ADR §15)
   auth-server:
-    build: ./apps/auth-server
+    build:
+      context: ./apps/auth-server
+      target: runtime # non-root, no dev deps; docker-compose.dev.yml switches to `dev`
     restart: unless-stopped
     environment:
       <<: *auth-env
@@ -93,19 +113,19 @@ services:
       retries: 10
 
   svc-impots:
-    build: ./apps/mock-services
+    build: ./apps/mock-services # one stage target: runtime (non-root)
     restart: unless-stopped
     environment:
       SERVICE_NAME: svc-impots
       ISSUER: https://auth.authentint.localhost
       AUDIENCE: svc-impots
-      CA_BUNDLE: /caddy-data/caddy/pki/authorities/local/root.crt
+      CA_BUNDLE: /ca/root.crt
     volumes:
-      - caddy_data:/caddy-data:ro # pour valider le TLS de Caddy
+      - caddy_ca:/ca:ro # pour valider le TLS de Caddy (le certificat racine seul)
     networks: [edge]
     depends_on:
-      caddy:
-        condition: service_healthy
+      ca-export:
+        condition: service_completed_successfully
     healthcheck:
       # live, not ready: the mock must stay up while auth-server boots (it retries the JWKS itself)
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health/live')"]
@@ -120,13 +140,13 @@ services:
       SERVICE_NAME: svc-cadastre
       ISSUER: https://auth.authentint.localhost
       AUDIENCE: svc-cadastre
-      CA_BUNDLE: /caddy-data/caddy/pki/authorities/local/root.crt
+      CA_BUNDLE: /ca/root.crt
     volumes:
-      - caddy_data:/caddy-data:ro
+      - caddy_ca:/ca:ro
     networks: [edge]
     depends_on:
-      caddy:
-        condition: service_healthy
+      ca-export:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health/live')"]
       interval: 5s
