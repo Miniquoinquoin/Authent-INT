@@ -44,6 +44,12 @@ function withQuery(uri: string, params: Record<string, string>): string {
   return `${uri}${uri.includes('?') ? '&' : '?'}${new URLSearchParams(params)}`
 }
 
+/** shown_scopes(): before login the request as is; once the user is known, what /authorize will GRANT. */
+function shownScopes(uid: string, it: MockInteraction): string[] {
+  const user = loggedIn.get(uid)
+  return user ? grant(it.scope.split(' '), user.role).sort() : it.scope.split(' ')
+}
+
 function view(uid: string, it: MockInteraction): InteractionView {
   const user = loggedIn.get(uid)
   // next_step(): no user → login; consent required (the mock client always asks) → consent; else done
@@ -57,7 +63,7 @@ function view(uid: string, it: MockInteraction): InteractionView {
     })
     redirect_to = withQuery(it.redirect_uri, { code, state: it.state })
   }
-  return { prompt, client_name: CLIENT_NAMES[it.client_id] ?? it.client_id, scopes: it.scope.split(' '), redirect_to }
+  return { prompt, client_name: CLIENT_NAMES[it.client_id] ?? it.client_id, scopes: shownScopes(uid, it), redirect_to }
 }
 
 const detail = (code: string, status: number) => HttpResponse.json({ detail: code }, { status })
@@ -91,7 +97,7 @@ export const interactionHandlers = [
     if (!body.approve) {
       finished.add(params.uid) // the flow is over: this uid can't be replayed
       return HttpResponse.json<InteractionView>({
-        prompt: null, client_name: CLIENT_NAMES[it.client_id] ?? it.client_id, scopes: it.scope.split(' '),
+        prompt: null, client_name: CLIENT_NAMES[it.client_id] ?? it.client_id, scopes: shownScopes(params.uid, it),
         redirect_to: withQuery(it.redirect_uri, { error: 'access_denied', state: it.state }),
       })
     }
