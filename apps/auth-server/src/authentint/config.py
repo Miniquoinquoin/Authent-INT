@@ -11,9 +11,8 @@ class Settings(BaseSettings):
     numero_fiscal_key: str  # HMAC key of users.numero_fiscal_hmac: changing it breaks every login until a re-sync
     access_token_ttl: int = 600
     id_token_ttl: int = 300
-    otp_ttl: int = 30
     code_ttl: int = 60
-    refresh_token_ttl: int = 7 * 24 * 3600
+    refresh_token_ttl: int = 30 * 24 * 3600  # ADR §10: 30 days, rotated on every use
     fixtures_path: str | None = None  # fake LDAP directory for scripts/seed.py, dev only
 
     @model_validator(mode="after")

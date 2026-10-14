@@ -11,7 +11,7 @@ async def test_an_empty_form_is_an_invalid_request(client):
     assert r.json() == {"error": "invalid_request"}
     assert r.headers["cache-control"] == "no-store"
 
-@pytest.mark.parametrize("grant_type", ["password", "client_credentials", "refresh_token"])
+@pytest.mark.parametrize("grant_type", ["password", "client_credentials", "implicit"])
 async def test_an_unknown_grant_is_unsupported(client, grant_type):
     r = await client.post("/token", data={"grant_type": grant_type, "code": "x", "redirect_uri": "https://app.test/cb",
                                           "client_id": "test-spa", "code_verifier": VERIFIER})

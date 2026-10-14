@@ -47,4 +47,10 @@ async def from_cookie(session: AsyncSession, request: Request) -> Sessions | Non
     except ValueError:
         return None
 
+    return await live(session, session_id)
+
+
+async def live(session: AsyncSession, session_id: UUID) -> Sessions | None:
+    """The session if neither revoked nor expired. Filtered in SQL: a revocation by UPDATE elsewhere is always seen."""
+
     return await session.scalar(select(Sessions).where(Sessions.id == session_id, Sessions.revoked_at.is_(None), Sessions.expires_at > func.now()))

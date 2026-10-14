@@ -3,6 +3,7 @@
 from . import router
 from authentint.config import settings
 from authentint.domain.claims import IdToken
+from authentint.domain.errors import GRANT_TYPES
 from authentint.domain.scopes import ALLOWED, OIDC_SCOPES
 
 # Derived from domain/ so the published lists can't drift from what the server grants
@@ -16,6 +17,6 @@ async def discovery():
     return {"issuer": issuer, "authorization_endpoint": f"{issuer}/authorize", "token_endpoint": f"{issuer}/token",
             "jwks_uri": f"{issuer}/.well-known/jwks.json", "userinfo_endpoint": f"{issuer}/userinfo",
             "end_session_endpoint": f"{issuer}/end-session", "revocation_endpoint": f"{issuer}/revoke",
-            "response_types_supported": ["code"], "grant_types_supported": ["authorization_code", "refresh_token"],
+            "response_types_supported": ["code"], "grant_types_supported": list(GRANT_TYPES),
             "code_challenge_methods_supported": ["S256"], "id_token_signing_alg_values_supported": ["RS256"],
             "scopes_supported": SCOPES_SUPPORTED, "claims_supported": CLAIMS_SUPPORTED, "subject_types_supported": ["public"]}

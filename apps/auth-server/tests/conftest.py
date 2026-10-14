@@ -140,11 +140,11 @@ VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 
 @pytest.fixture
 async def wide_spa(s) -> OAuthClients:
-    """A client allowing every scope: only the user's role can reduce what is granted."""
+    """A client allowing every scope and grant: only the user's role can reduce what is granted."""
 
     c = OAuthClients(id="wide-spa", name="Wide SPA", type=ClientType.public, secret_hash=None,
                      redirect_uris=["https://app.test/cb"], post_logout_redirect_uris=[],
-                     allowed_grants=["authorization_code"], allowed_scopes=sorted(OIDC_SCOPES.union(*ALLOWED.values())),
+                     allowed_grants=["authorization_code", "refresh_token"], allowed_scopes=sorted(OIDC_SCOPES.union(*ALLOWED.values())),
                      require_consent=False)
     s.add(c)
     await s.flush()

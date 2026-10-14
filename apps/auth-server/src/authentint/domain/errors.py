@@ -17,6 +17,8 @@ from fastapi.exception_handlers import request_validation_exception_handler
 # The only `error=` values the server may emit: RFC 6749 §4.1.2.1 (/authorize) and §5.2 (/token)
 AuthorizeErrorCode = Literal["invalid_request", "unauthorized_client", "access_denied", "unsupported_response_type",
                              "invalid_scope", "server_error", "temporarily_unavailable"]
+# What /token accepts (oidc/token.py has one body per grant) and discovery advertises
+GRANT_TYPES = ("authorization_code", "refresh_token")
 TokenErrorCode = Literal["invalid_request", "invalid_client", "invalid_grant", "unauthorized_client",
                          "unsupported_grant_type", "invalid_scope"]
 
@@ -37,8 +39,9 @@ async def token_validation_handler(request, exc) -> JSONResponse:
 
     code = "invalid_request"
 
-    # A MISSING grant_type is a missing parameter (invalid_request); only an unknown value is unsupported
-    if any("grant_type" in e["loc"] and e["type"] != "missing" for e in exc.errors()):
+    # A MISSING grant_type is a missing parameter (invalid_request); only an unknown value is unsupported.
+    # Checked on the value: the body is a union, so a refresh request also fails the code body's grant_type literal
+    if any("grant_type" in e["loc"] and e["type"] != "missing" and e["input"] not in GRANT_TYPES for e in exc.errors()):
         code = "unsupported_grant_type"
 
     return JSONResponse({"error": code}, headers={"Cache-Control": "no-store"}, status_code=400)

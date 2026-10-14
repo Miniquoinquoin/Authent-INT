@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from authentint.domain.claims import AccessToken
 from authentint.domain.claims import IdToken
+from authentint.domain.claims import RefreshedIdToken
 from authentint.domain.errors import redirect_error
 from authentint.domain.scopes import ALLOWED
 from authentint.domain.scopes import audiences
@@ -48,7 +49,11 @@ def test_without_openid_the_idp_is_not_an_audience():
 def test_an_id_token_cannot_be_built_without_nonce():
     with pytest.raises(ValidationError):
         IdToken(iss="i", sub=uuid4(), aud="a", exp=1, iat=1, auth_time=1, acr="x", amr=["pwd"], sid=uuid4(),
-                name="n", given_name="g", family_name="f", role=Role.agent)
+                name="n", given_name="g", family_name="f", role=Role.agent, at_hash="h")
+
+def test_only_a_refreshed_id_token_goes_without_nonce():
+    # OIDC Core §12.2: the refresh request has no nonce to echo
+    assert "nonce" not in RefreshedIdToken.model_fields
 
 def test_the_access_token_carries_no_role_nor_personal_data():
     # Resource Servers authorise on scope only (invariant 12); they never learn who the user is
