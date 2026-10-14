@@ -21,31 +21,32 @@
 		output stdout
 		format console
 	}
+	request_header X-Request-Id {http.request.uuid}
 }
 
 # --- OpenID Provider -------------------------------------------------------
 # Ce nom est l'`issuer`. Le navigateur et les conteneurs l'utilisent tel quel.
-auth.authentint.local {
+auth.authentint.localhost {
 	tls internal
 	import commun
 	reverse_proxy auth-server:8000
 }
 
 # --- SPA -------------------------------------------------------------------
-app.authentint.local {
+app.authentint.localhost {
 	tls internal
 	import commun
 	reverse_proxy frontend:80
 }
 
 # --- Resource Servers ------------------------------------------------------
-impots.authentint.local {
+impots.authentint.localhost {
 	tls internal
 	import commun
 	reverse_proxy svc-impots:8001
 }
 
-cadastre.authentint.local {
+cadastre.authentint.localhost {
 	tls internal
 	import commun
 	reverse_proxy svc-cadastre:8001
