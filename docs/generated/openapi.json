@@ -319,6 +319,94 @@
         }
       }
     },
+    "/account/password-reset/request": {
+      "post": {
+        "tags": [
+          "interaction",
+          "account"
+        ],
+        "summary": "Request Reset",
+        "description": "Always 202 with the same body: whether an e-mail left is never told.",
+        "operationId": "request_reset_account_password_reset_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/account/password-reset/confirm": {
+      "post": {
+        "tags": [
+          "interaction",
+          "account"
+        ],
+        "summary": "Confirm Reset",
+        "description": "The link's token + the new password. Every open session of the account is closed.",
+        "operationId": "confirm_reset_account_password_reset_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetConfirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown, expired or already used link (same answer for the three)"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/admin/keys/rotate": {
       "post": {
         "tags": [
@@ -516,6 +604,42 @@
           "password"
         ],
         "title": "LoginBody"
+      },
+      "ResetConfirm": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Token"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 12,
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "password"
+        ],
+        "title": "ResetConfirm"
+      },
+      "ResetRequest": {
+        "properties": {
+          "numero_fiscal": {
+            "type": "string",
+            "pattern": "^\\d{13}$",
+            "title": "Numero Fiscal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "numero_fiscal"
+        ],
+        "title": "ResetRequest"
       },
       "ValidationError": {
         "properties": {
