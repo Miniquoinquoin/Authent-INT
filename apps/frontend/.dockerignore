@@ -30,3 +30,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+# =========================================
+# Tests output (never part of the image)
+# =========================================
+test-results/
+playwright-report/
+blob-report/
