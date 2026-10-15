@@ -269,6 +269,26 @@ a:focus-visible {
   padding: 18px;
 }
 
+.tile h3 a {
+  color: inherit;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table-wrap th,
+.table-wrap td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
 .tile-access {
   margin: 0;
   font-size: 0.85rem;

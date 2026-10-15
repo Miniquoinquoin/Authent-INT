@@ -20,6 +20,8 @@ export const API_ERRORS: Record<ApiErrorCode, string> = {
   validation: 'Les informations saisies ne sont pas valides.',
   network: 'Le service est momentanément injoignable. Vérifiez votre connexion et réessayez.',
   unexpected: 'Une erreur inattendue est survenue. Réessayez plus tard.',
+  session_expired: 'Votre session a expiré. Reconnectez-vous pour continuer.',
+  forbidden: "Votre compte n'a pas accès à ce service.",
 }
 
 export const OIDC_ERRORS: Record<OidcErrorCode, string> = {

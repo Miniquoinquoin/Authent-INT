@@ -1,4 +1,4 @@
-# Serves dist/ (learning-plan, apps/frontend). ${AUTH_ORIGIN} is filled at image build time
+# Serves dist/ (learning-plan, apps/frontend). ${AUTH_ORIGIN}, ${IMPOTS_ORIGIN}, ${CADASTRE_ORIGIN} are filled at image build time
 # from the same VITE_AUTH_URL the bundle was built with (see Dockerfile).
 server {
     listen 80;
@@ -7,10 +7,10 @@ server {
     server_tokens off;
 
     # Declared once here: the locations below use `expires`, not add_header, so they inherit these.
-    # CSP: only our own scripts and styles; the only API the page may call is the auth-server.
+    # CSP: only our own scripts and styles; the only APIs the page may call are the auth-server and the services.
     # An injected <script src=…> from elsewhere doesn't load; frame-ancestors forbids showing
     # the login page in someone else's iframe (clickjacking).
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ${AUTH_ORIGIN}; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ${AUTH_ORIGIN} ${IMPOTS_ORIGIN} ${CADASTRE_ORIGIN}; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'" always;
     add_header X-Frame-Options "DENY" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "no-referrer" always;

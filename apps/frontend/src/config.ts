@@ -32,6 +32,14 @@ export const REDIRECT_URI = absolute(
   (import.meta.env.VITE_OIDC_REDIRECT_URI as string | undefined) ?? '/callback',
 )
 
+/** The Resource Servers the portal calls with the access token (ADR §11). */
+export const IMPOTS_URL = absolute(
+  (import.meta.env.VITE_IMPOTS_URL as string | undefined) ?? 'https://impots.authentint.localhost',
+).replace(/\/+$/, '')
+export const CADASTRE_URL = absolute(
+  (import.meta.env.VITE_CADASTRE_URL as string | undefined) ?? 'https://cadastre.authentint.localhost',
+).replace(/\/+$/, '')
+
 export const POST_LOGOUT_REDIRECT_URI = absolute(
   (import.meta.env.VITE_OIDC_POST_LOGOUT_REDIRECT_URI as string | undefined) ?? '/',
 )

@@ -27,12 +27,23 @@ export default defineConfig(({ mode }) => ({
   plugins: [react(), mode === 'mock' && mswWorker()],
   // Mock mode: the "auth-server" is this same origin under /mock-auth, so the service worker
   // sees every call (it only intercepts same-origin requests)
-  define: mode === 'mock' ? { 'import.meta.env.VITE_AUTH_URL': JSON.stringify('/mock-auth') } : {},
+  define:
+    mode === 'mock'
+      ? {
+          'import.meta.env.VITE_AUTH_URL': JSON.stringify('/mock-auth'),
+          'import.meta.env.VITE_IMPOTS_URL': JSON.stringify('/mock-impots'),
+          'import.meta.env.VITE_CADASTRE_URL': JSON.stringify('/mock-cadastre'),
+        }
+      : {},
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     // The auth-server as the tests see it: MSW (msw/node) answers on this origin
-    env: { VITE_AUTH_URL: 'https://auth.authentint.test' },
+    env: {
+      VITE_AUTH_URL: 'https://auth.authentint.test',
+      VITE_IMPOTS_URL: 'https://impots.authentint.test',
+      VITE_CADASTRE_URL: 'https://cadastre.authentint.test',
+    },
   },
 }))
