@@ -24,7 +24,7 @@ async def test_login_tokens_refresh_logout(client, s, wide_spa, authorize_params
 
     # no session yet: /authorize sends the browser to the login screen
     r = await client.get("/authorize", params=params)
-    assert r.headers["location"].startswith(f"{settings.public_base_url}/login?uid=")
+    assert r.headers["location"].startswith(f"{settings.issuer}/login?uid=")
     uid = parse_qs(urlsplit(r.headers["location"]).query)["uid"][0]
 
     r = await client.post(f"/interaction/{uid}/login", json={"numero_fiscal": alice.numero_fiscal, "password": alice_password})
@@ -56,4 +56,4 @@ async def test_login_tokens_refresh_logout(client, s, wide_spa, authorize_params
     r = await client.post("/token", data={"grant_type": "refresh_token", "refresh_token": refreshed["refresh_token"], "client_id": wide_spa.id})
     assert r.json() == {"error": "invalid_grant"}
     r = await client.get("/authorize", params=params)
-    assert r.headers["location"].startswith(f"{settings.public_base_url}/login?uid=")  # no SSO left: log in again
+    assert r.headers["location"].startswith(f"{settings.issuer}/login?uid=")  # no SSO left: log in again

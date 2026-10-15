@@ -33,6 +33,10 @@ auth.authentint.localhost {
 	# it reveals traffic, error rates and route usage. Same 404 as any unknown path (ADR §9 Ops).
 	@metrics path /metrics /metrics/*
 	respond @metrics 404
+	# The login page is served from the issuer's origin: its __Host-session cookie is then
+	# first-party in every browser (Safari treats app. -> auth. under .localhost as cross-site).
+	@spa path /login /assets/* /background/* /authent_int_*.png /favicon.ico
+	reverse_proxy @spa frontend:80
 	reverse_proxy auth-server:8000
 }
 
