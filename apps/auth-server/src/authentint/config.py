@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     dev: bool = False  # DEV=true only via docker-compose.dev.yml; never in prod
     issuer: str
-    public_base_url: str  # SPA origin: /login redirect target and the only CORS origin
+    public_base_url: str  # SPA origin: mail links and the only CORS origin (/login is served on the issuer's origin)
     database_url: str
     key_encryption_key: str
     numero_fiscal_key: str  # HMAC key of users.numero_fiscal_hmac: changing it breaks every login until a re-sync

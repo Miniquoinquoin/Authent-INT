@@ -269,9 +269,12 @@ cadastre.authentint.localhost { tls internal; reverse_proxy svc-cadastre:8001 }
 Aucun `/etc/hosts` à éditer : `.localhost` est réservé au loopback
 (RFC 6761) et les navigateurs résolvent tout `*.localhost` vers `127.0.0.1`
 d'eux-mêmes. `.local` est écarté : il appartient au mDNS (RFC 6762) et
-imposait une ligne `/etc/hosts` sur chaque machine. Le parent commun
-`authentint.localhost` est voulu : `auth.` et `app.` restent le même *site*,
-donc le cookie de session `SameSite=Lax` posé par le login passe.
+imposait une ligne `/etc/hosts` sur chaque machine. On ne compte pas sur
+`auth.` et `app.` formant le même *site* : Safari les traite en cross-site
+sous `.localhost` et jette le cookie posé par un `fetch` de `app.`. La page
+`/login` est donc servie aussi sur l'origine de l'issuer (`auth.`, route
+`@spa` du Caddyfile), et `/authorize` y redirige : le cookie de session
+`SameSite=Lax` est alors first-party dans tous les navigateurs.
 
 **C'est un échafaudage de développement, pas de l'architecture.** Dans
 Kubernetes, l'Ingress Controller du client le remplace (§12). Ne pas y passer

@@ -13,7 +13,7 @@ async def start(client, authorize_params) -> str:
     r = await client.get("/authorize", params=authorize_params())
     assert r.status_code == 302
     location = urlsplit(r.headers["location"])
-    assert f"{location.scheme}://{location.netloc}{location.path}" == f"{settings.public_base_url}/login"
+    assert f"{location.scheme}://{location.netloc}{location.path}" == f"{settings.issuer}/login"
     return parse_qs(location.query)["uid"][0]
 
 async def test_no_session_leads_to_the_login_step(client, authorize_params):

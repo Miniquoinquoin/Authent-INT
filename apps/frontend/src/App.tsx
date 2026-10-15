@@ -9,7 +9,7 @@ import Portal from './pages/Portal'
 
 /**
  * Routes. /login, /activate and /reset-password are fixed by the auth-server: it redirects to
- * `${PUBLIC_BASE_URL}/login?uid=…` and mails `/activate?token=…`, `/reset-password?token=…`.
+ * `${ISSUER}/login?uid=…` (Caddy serves this SPA there too, so the session cookie is first-party) and mails `/activate?token=…`, `/reset-password?token=…`.
  * /callback is portail-web's registered redirect_uri. `extra` is how the mock mode adds its
  * fake /authorize (src/mocks/browser.tsx) without the routes existing in a real build.
  */

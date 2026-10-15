@@ -63,7 +63,7 @@ async def authorize(request: Request, session=Depends(get_session)):
     if sso is None:
         it = await interaction.create(session, params)
 
-        return RedirectResponse(f"{settings.public_base_url}/login?uid={it.uid}", 302)
+        return RedirectResponse(f"{settings.issuer}/login?uid={it.uid}", 302)
 
     user = await session.get(User, sso.user_id)
 
@@ -82,7 +82,7 @@ async def authorize(request: Request, session=Depends(get_session)):
     if client.require_consent and not await consents.covers(session, user.id, client.id, granted):
         it = await interaction.create(session, params, user_id=user.id)  # known user: the first step is consent
 
-        return RedirectResponse(f"{settings.public_base_url}/login?uid={it.uid}", 302)
+        return RedirectResponse(f"{settings.issuer}/login?uid={it.uid}", 302)
 
     oauth_auth_code = await issue_code(session, params, sso, " ".join(sorted(granted)))
     redirect_url = f"{params.redirect_uri}{"&" if "?" in params.redirect_uri else "?"}{urlencode({"code": oauth_auth_code, "state": params.state})}"

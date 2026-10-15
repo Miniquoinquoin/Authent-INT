@@ -15,7 +15,7 @@ from authentint.infra.models.oauth import OAuthConsents
 
 
 def uid_of(location: str) -> str:
-    assert location.startswith(f"{settings.public_base_url}/login?uid="), location
+    assert location.startswith(f"{settings.issuer}/login?uid="), location
     return parse_qs(urlsplit(location).query)["uid"][0]
 
 
