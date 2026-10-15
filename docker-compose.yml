@@ -120,6 +120,7 @@ services:
       ISSUER: https://auth.authentint.localhost
       AUDIENCE: svc-impots
       CA_BUNDLE: /ca/root.crt
+      CORS_ORIGIN: https://app.authentint.localhost # the portal calls us from the browser
     volumes:
       - caddy_ca:/ca:ro # pour valider le TLS de Caddy (le certificat racine seul)
     networks: [edge]
@@ -141,6 +142,7 @@ services:
       ISSUER: https://auth.authentint.localhost
       AUDIENCE: svc-cadastre
       CA_BUNDLE: /ca/root.crt
+      CORS_ORIGIN: https://app.authentint.localhost # the portal calls us from the browser
     volumes:
       - caddy_ca:/ca:ro
     networks: [edge]

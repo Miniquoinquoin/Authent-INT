@@ -6,6 +6,8 @@ import Callback from './pages/Callback'
 import Login from './pages/login/Login'
 import NotFound from './pages/NotFound'
 import Portal from './pages/Portal'
+import ServicePage from './pages/ServicePage'
+import { SERVICES } from './services'
 
 /**
  * Routes. /login, /activate and /reset-password are fixed by the auth-server: it redirects to
@@ -24,6 +26,10 @@ export default function App({ extra }: { extra?: ReactNode }) {
         <Route path="/activate" element={<ChoosePassword kind="activation" />} />
         <Route path="/mot-de-passe-oublie" element={<RequestLink kind="reset" />} />
         <Route path="/reset-password" element={<ChoosePassword kind="reset" />} />
+        {/* key: /impots → /cadastre mounts a fresh page, not the previous one's rows */}
+        {SERVICES.map((s) => (
+          <Route key={s.id} path={`/${s.id}`} element={<ServicePage key={s.id} service={s} />} />
+        ))}
         {extra}
         <Route path="*" element={<NotFound />} />
       </Routes>

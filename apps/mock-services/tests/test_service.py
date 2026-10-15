@@ -153,3 +153,15 @@ async def test_ready_waits_for_the_issuer_keys(service, issuer, clock):
     issuer.down = False
     clock.now += 2
     assert (await impots.get("/health/ready")).status_code == 200
+
+
+async def test_cors_answers_the_portal_only(jwks):
+    portal = "https://app.authentint.localhost"
+    app = create_app(Settings(service_name="svc-impots", issuer=ISSUER, audience="svc-impots", cors_origin=portal), jwks=jwks)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://impots.authentint.localhost") as client:
+        preflight = {"Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "authorization"}
+        ok = await client.options("/dossiers", headers={"Origin": portal, **preflight})
+        assert ok.headers["access-control-allow-origin"] == portal
+        assert "access-control-allow-credentials" not in ok.headers
+        other = await client.options("/dossiers", headers={"Origin": "https://evil.example", **preflight})
+        assert "access-control-allow-origin" not in other.headers

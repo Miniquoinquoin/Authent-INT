@@ -3,31 +3,7 @@ import { logout, startLogin } from '../auth/oidc'
 import { useSession } from '../auth/session'
 import type { Role } from '../auth/claims'
 import { Layout } from '../components/Layout'
-
-interface Service {
-  id: string
-  title: string
-  description: string
-  read: string
-  write: string
-}
-
-const SERVICES: Service[] = [
-  {
-    id: 'impots',
-    title: 'Impôts',
-    description: 'Vos dossiers fiscaux : déclarations, avis et paiements.',
-    read: 'svc:impots.read',
-    write: 'svc:impots.write',
-  },
-  {
-    id: 'cadastre',
-    title: 'Cadastre',
-    description: 'Le plan cadastral et les informations sur les parcelles.',
-    read: 'svc:cadastre.read',
-    write: 'svc:cadastre.write',
-  },
-]
+import { SERVICES } from '../services'
 
 const ROLES: Record<Role, string> = { admin: 'Administrateur', agent: 'Agent', contribuable: 'Contribuable' }
 
@@ -77,7 +53,9 @@ export default function Portal() {
         <ul className="tiles">
           {services.map((service) => (
             <li key={service.id} className="tile" data-testid={`tuile-${service.id}`}>
-              <h3>{service.title}</h3>
+              <h3>
+                <Link to={`/${service.id}`}>{service.title}</Link>
+              </h3>
               <p>{service.description}</p>
               <p className="tile-access">{has(service.write) ? 'Consultation et modification' : 'Consultation'}</p>
             </li>

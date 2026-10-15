@@ -64,6 +64,13 @@ describe('portal', () => {
     if (tiles.length === 0) expect(screen.getByText(/Aucun service/)).toBeInTheDocument()
   })
 
+  it('each tile links to its service page', () => {
+    logInWith(['openid', 'svc:impots.read', 'svc:cadastre.read'])
+    renderPortal()
+    expect(screen.getByRole('link', { name: 'Impôts' })).toHaveAttribute('href', '/impots')
+    expect(screen.getByRole('link', { name: 'Cadastre' })).toHaveAttribute('href', '/cadastre')
+  })
+
   it('tells read-only from read-write', () => {
     logInWith(['openid', 'svc:impots.read', 'svc:impots.write', 'svc:cadastre.read'])
     renderPortal()

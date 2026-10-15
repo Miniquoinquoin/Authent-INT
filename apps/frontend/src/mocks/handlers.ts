@@ -8,8 +8,9 @@
 import { accountHandlers } from './account'
 import { interactionHandlers, resetInteractionMock } from './interaction'
 import { oidcHandlers, resetOidcMock } from './oidc'
+import { serviceHandlers } from './services'
 
-export const handlers = [...interactionHandlers, ...accountHandlers, ...oidcHandlers]
+export const handlers = [...interactionHandlers, ...accountHandlers, ...oidcHandlers, ...serviceHandlers]
 
 /** Forget used codes, logged-in interactions...: one test must not see the previous one's state. */
 export function resetMocks(): void {

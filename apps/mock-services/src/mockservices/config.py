@@ -19,3 +19,5 @@ class Settings(BaseSettings):
     jwks_retry_delay: float = 2.0
     # Clock skew tolerated on exp / nbf / iat, in seconds
     leeway: int = 30
+    # The portal's origin, the only page allowed to call us from a browser. Unset = no CORS at all
+    cors_origin: str | None = None

@@ -7,6 +7,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from mockservices.auth import Verifier
@@ -41,6 +42,10 @@ def create_app(settings: Settings | None = None, jwks: JwksClient | None = None)
     app.state.jwks = jwks
     app.state.verifier = Verifier(settings, jwks)
     app.include_router(ROUTERS[settings.audience])
+    if settings.cors_origin:
+        # The token travels in Authorization, never in a cookie: no allow_credentials
+        app.add_middleware(CORSMiddleware, allow_origins=[settings.cors_origin],
+                           allow_methods=["GET", "POST", "PATCH"], allow_headers=["Authorization", "Content-Type"])
 
     @app.get("/health/live", tags=["ops"])
     async def live():

@@ -26,8 +26,11 @@ const SERVER_CODES = [
 ] as const
 
 export type ServerErrorCode = (typeof SERVER_CODES)[number]
-/** `validation`: 422. `network`: no answer at all. `unexpected`: anything else (5xx...). */
-export type ApiErrorCode = ServerErrorCode | 'validation' | 'network' | 'unexpected'
+/**
+ * `validation`: 422. `network`: no answer at all. `unexpected`: anything else (5xx...).
+ * `session_expired` / `forbidden`: a Resource Server's 401 / 403 (api/resources.ts).
+ */
+export type ApiErrorCode = ServerErrorCode | 'validation' | 'network' | 'unexpected' | 'session_expired' | 'forbidden'
 
 export class ApiError extends Error {
   readonly code: ApiErrorCode
