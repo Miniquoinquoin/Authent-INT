@@ -34,10 +34,10 @@ export const REDIRECT_URI = absolute(
 
 /** The Resource Servers the portal calls with the access token (ADR §11). */
 export const IMPOTS_URL = absolute(
-  (import.meta.env.VITE_IMPOTS_URL as string | undefined) ?? 'https://impots.authentint.localhost',
+  (import.meta.env.VITE_IMPOTS_URL as string | undefined) ?? 'https://app.authentint.localhost/api/impots',
 ).replace(/\/+$/, '')
 export const CADASTRE_URL = absolute(
-  (import.meta.env.VITE_CADASTRE_URL as string | undefined) ?? 'https://cadastre.authentint.localhost',
+  (import.meta.env.VITE_CADASTRE_URL as string | undefined) ?? 'https://app.authentint.localhost/api/cadastre',
 ).replace(/\/+$/, '')
 
 export const POST_LOGOUT_REDIRECT_URI = absolute(
