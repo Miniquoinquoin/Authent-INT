@@ -274,7 +274,11 @@ imposait une ligne `/etc/hosts` sur chaque machine. On ne compte pas sur
 sous `.localhost` et jette le cookie posé par un `fetch` de `app.`. La page
 `/login` est donc servie aussi sur l'origine de l'issuer (`auth.`, route
 `@spa` du Caddyfile), et `/authorize` y redirige : le cookie de session
-`SameSite=Lax` est alors first-party dans tous les navigateurs.
+`SameSite=Lax` est alors first-party dans tous les navigateurs. De même, le
+portail appelle les Resource Servers sous sa propre origine
+(`app.…/api/impots`, `app.…/api/cadastre`, `handle_path` du Caddyfile) : faire
+confiance à la CA de Caddy reste optionnel, et un `fetch` vers `impots.` ne
+peut pas afficher l'avertissement de certificat qu'on accepterait d'un clic.
 
 **C'est un échafaudage de développement, pas de l'architecture.** Dans
 Kubernetes, l'Ingress Controller du client le remplace (§12). Ne pas y passer

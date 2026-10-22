@@ -44,7 +44,18 @@ auth.authentint.localhost {
 app.authentint.localhost {
 	tls internal
 	import commun
-	reverse_proxy frontend:80
+	# The Resource Servers under the portal's own origin: the browser fetch()es them, so a
+	# cert warning on impots./cadastre. could never be clicked through (CA trust is optional).
+	# /api/ because /impots and /cadastre are SPA routes; handle_path strips the prefix.
+	handle_path /api/impots/* {
+		reverse_proxy svc-impots:8001
+	}
+	handle_path /api/cadastre/* {
+		reverse_proxy svc-cadastre:8001
+	}
+	handle {
+		reverse_proxy frontend:80
+	}
 }
 
 # --- Resource Servers ------------------------------------------------------
