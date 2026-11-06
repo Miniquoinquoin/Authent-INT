@@ -39,6 +39,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."] # tests import scripts/ too
 asyncio_mode = "auto"
 # One event loop for the whole run: the engine's asyncpg pool is global and tied to the loop that opened it
 asyncio_default_fixture_loop_scope = "session"

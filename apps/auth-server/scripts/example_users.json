@@ -1,0 +1,26 @@
+[
+    {
+        "external_id": "example-admin",
+        "numero_fiscal": "1900000000001",
+        "nom": "Exemple",
+        "prenom": "Admin",
+        "email": "admin@authentint.example",
+        "groups": ["cn=admins,ou=groupes,dc=dgfip,dc=local"]
+    },
+    {
+        "external_id": "example-agent",
+        "numero_fiscal": "1900000000002",
+        "nom": "Exemple",
+        "prenom": "Agent",
+        "email": "agent@authentint.example",
+        "groups": ["cn=agents,ou=groupes,dc=dgfip,dc=local"]
+    },
+    {
+        "external_id": "example-contribuable",
+        "numero_fiscal": "1900000000003",
+        "nom": "Exemple",
+        "prenom": "Contribuable",
+        "email": "contribuable@authentint.example",
+        "groups": ["cn=contribuables,ou=groupes,dc=dgfip,dc=local"]
+    }
+]

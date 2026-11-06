@@ -290,6 +290,8 @@ disparaissent aux *seams*, à deux personnes. Détail et justification :
   `main`, CI verte obligatoire.
 - `make up` · `make test` · `make seed` · `make openapi` (charge : `make seed N=400` puis `make load`, `make load-scale3`, `make scale3-check` — voir `docs/load-report.md`) — rien d'autre à
   connaître pour démarrer ([README de l'auth-server](../apps/auth-server/README.md)).
+- Hors dev (image `runtime`) : `python -m scripts.bootstrap [annuaire.json]` crée le client `portail-web` et importe
+  les utilisateurs en `pending_activation`. `scripts/example_users.json` : comptes d'exemple, à vos risques.
 - Un invariant de [architecture.md §15](architecture.md#15-invariants) = un
   test dans `tests/security/`, écrit **avant** le code qui le respecte.
 - Toucher un contrat de [§6](#6-ce-que-b0-a-gelé) : prévenir les couloirs
