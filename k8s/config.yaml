@@ -1,0 +1,12 @@
+# authentint.example is replaced at deploy time. Changing the real domain also means a new certificate and a frontend rebuild.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentint-config
+data:
+  ISSUER: https://auth.authentint.example
+  PUBLIC_BASE_URL: https://app.authentint.example
+  LOG_LEVEL: INFO
+  # uvicorn only believes X-Forwarded-For from these addresses. RKE2's default pod range: the Ingress controller
+  # lives there, but so does every other pod, and without a NetworkPolicy they could spoof their client IP.
+  FORWARDED_ALLOW_IPS: 10.42.0.0/16

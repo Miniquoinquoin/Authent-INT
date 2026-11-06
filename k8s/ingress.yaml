@@ -1,0 +1,123 @@
+# The Caddyfile's routes (caddy/Caddyfile), for the cluster's Ingress controller. Keep the two in step.
+# No ingressClassName on purpose: on this cluster the controller only picks up Ingresses without one (see the doc).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: auth
+spec:
+  tls:
+    - hosts: [auth.authentint.example]
+      secretName: authentint-tls
+  rules:
+    - host: auth.authentint.example
+      http:
+        paths:
+          # /metrics reveals traffic and error rates, and must never reach auth-server. It lands on the frontend (the SPA's
+          # page, status 200) rather than a 404, because the snippet annotations a real 404 needs are usually disabled.
+          - path: /metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+          # The login page is served from the issuer's origin, so its __Host-session cookie is first-party.
+          - path: /login
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+          - path: /assets
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+          - path: /background
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+          - path: /favicon.ico
+            pathType: Exact
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+          - path: /authent_int_favicon.png
+            pathType: Exact
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+          - path: /authent_int_full_logo.png
+            pathType: Exact
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: auth-server
+                port:
+                  number: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app
+spec:
+  tls:
+    - hosts: [app.authentint.example]
+      secretName: authentint-tls
+  rules:
+    - host: app.authentint.example
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-api
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2 # strips /api/<service>, like Caddy's handle_path
+spec:
+  tls:
+    - hosts: [app.authentint.example]
+      secretName: authentint-tls
+  rules:
+    - host: app.authentint.example
+      http:
+        paths:
+          - path: /api/impots(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: svc-impots
+                port:
+                  number: 8001
+          - path: /api/cadastre(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: svc-cadastre
+                port:
+                  number: 8001
