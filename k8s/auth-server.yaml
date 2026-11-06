@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-server
+spec:
+  selector:
+    app: auth-server
+  ports:
+    - port: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-server
+spec:
+  # ponytail: 1 replica, because every pod migrates in its initContainer and several could race. Jobs are forbidden
+  # in this namespace. Scale up once migrations run elsewhere.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-server
+  template:
+    metadata:
+      labels:
+        app: auth-server
+    spec:
+      enableServiceLinks: false
+      imagePullSecrets:
+        - name: ghcr-pull # the images are private: created by create-secrets.sh
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      initContainers:
+        - name: migrate
+          image: authent-int-auth-server
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: authentint-config
+          env:
+            - name: DATABASE_URL # the owner migrates (DDL, grants) and creates authentint_app with APP_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: authentint-secrets, key: DATABASE_URL_OWNER }
+            - name: APP_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: authentint-secrets, key: APP_DB_PASSWORD }
+            - name: KEY_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: { name: authentint-secrets, key: KEY_ENCRYPTION_KEY }
+            - name: NUMERO_FISCAL_KEY
+              valueFrom:
+                secretKeyRef: { name: authentint-secrets, key: NUMERO_FISCAL_KEY }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+      containers:
+        - name: auth-server
+          image: authent-int-auth-server
+          envFrom:
+            - configMapRef:
+                name: authentint-config
+          env:
+            - name: DATABASE_URL # the runtime role: plain DML, audit append-only
+              valueFrom:
+                secretKeyRef: { name: authentint-secrets, key: DATABASE_URL_APP }
+            - name: KEY_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: { name: authentint-secrets, key: KEY_ENCRYPTION_KEY }
+            - name: NUMERO_FISCAL_KEY
+              valueFrom:
+                secretKeyRef: { name: authentint-secrets, key: NUMERO_FISCAL_KEY }
+          ports:
+            - containerPort: 8000
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8000 }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8000 }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi } # Argon2 takes 64 MiB per login in progress
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }

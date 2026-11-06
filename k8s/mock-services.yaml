@@ -1,0 +1,137 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-impots
+spec:
+  selector:
+    app: svc-impots
+  ports:
+    - port: 8001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: svc-impots
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: svc-impots
+  template:
+    metadata:
+      labels:
+        app: svc-impots
+    spec:
+      enableServiceLinks: false
+      imagePullSecrets:
+        - name: ghcr-pull # the images are private: created by create-secrets.sh
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: svc-impots
+          image: authent-int-mock-services
+          env:
+            - name: SERVICE_NAME
+              value: svc-impots
+            - name: AUDIENCE
+              value: svc-impots
+            - name: ISSUER
+              valueFrom:
+                configMapKeyRef: { name: authentint-config, key: ISSUER }
+            - name: CORS_ORIGIN
+              valueFrom:
+                configMapKeyRef: { name: authentint-config, key: PUBLIC_BASE_URL }
+            - name: CA_BUNDLE # the JWKS comes through the Ingress, whose certificate our own CA signs
+              value: /ca/root.crt
+          ports:
+            - containerPort: 8001
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8001 }
+            periodSeconds: 10
+          readinessProbe: # live, not ready: as in Compose, the mock stays up while auth-server boots
+            httpGet: { path: /health/live, port: 8001 }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 20m, memory: 96Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - name: ca
+              mountPath: /ca
+              readOnly: true
+      volumes:
+        - name: ca
+          configMap:
+            name: authentint-ca # created by create-secrets.sh: the public root only
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-cadastre
+spec:
+  selector:
+    app: svc-cadastre
+  ports:
+    - port: 8001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: svc-cadastre
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: svc-cadastre
+  template:
+    metadata:
+      labels:
+        app: svc-cadastre
+    spec:
+      enableServiceLinks: false
+      imagePullSecrets:
+        - name: ghcr-pull # the images are private: created by create-secrets.sh
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: svc-cadastre
+          image: authent-int-mock-services
+          env:
+            - name: SERVICE_NAME
+              value: svc-cadastre
+            - name: AUDIENCE
+              value: svc-cadastre
+            - name: ISSUER
+              valueFrom:
+                configMapKeyRef: { name: authentint-config, key: ISSUER }
+            - name: CORS_ORIGIN
+              valueFrom:
+                configMapKeyRef: { name: authentint-config, key: PUBLIC_BASE_URL }
+            - name: CA_BUNDLE # the JWKS comes through the Ingress, whose certificate our own CA signs
+              value: /ca/root.crt
+          ports:
+            - containerPort: 8001
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8001 }
+            periodSeconds: 10
+          readinessProbe: # live, not ready: as in Compose, the mock stays up while auth-server boots
+            httpGet: { path: /health/live, port: 8001 }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 20m, memory: 96Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - name: ca
+              mountPath: /ca
+              readOnly: true
+      volumes:
+        - name: ca
+          configMap:
+            name: authentint-ca # created by create-secrets.sh: the public root only
