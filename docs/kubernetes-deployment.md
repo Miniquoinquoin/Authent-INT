@@ -10,9 +10,9 @@ placeholder `authentint.example`, and the real value is kept in the gitignored `
 | Component | Kind | Notes |
 |---|---|---|
 | `postgres` | StatefulSet, 1 GiB PVC | Headless Service |
-| `auth-server` | Deployment, 1 replica | Migrates in an `initContainer`, runs non-root |
-| `frontend` | Deployment | Stock nginx image, runs as root |
-| `svc-impots`, `svc-cadastre` | Deployments | Trust our private CA through `CA_BUNDLE` |
+| `auth-server` | Deployment, 2 to 4 replicas (HPA) | Migrates in an `initContainer`, runs non-root |
+| `frontend` | Deployment, 2 replicas | Stock nginx image, runs as root |
+| `svc-impots`, `svc-cadastre` | Deployments, 1 to 4 replicas (HPA) | Trust our private CA through `CA_BUNDLE` |
 | `auth`, `app`, `app-api` | Ingresses | The routes of `caddy/Caddyfile` |
 
 Caddy doesn't run on the cluster: the cluster's Ingress controller replaces it.
@@ -22,7 +22,8 @@ Caddy doesn't run on the cluster: the cluster's Ingress controller replaces it.
 | ADR | Deployed | Why |
 |---|---|---|
 | Helm chart | Plain YAML and Kustomize | Enough for one namespace; a chart can come later |
-| At least 3 `auth-server` replicas | 1 | Each pod migrates in its `initContainer`, and several could race |
+| At least 3 `auth-server` replicas | 2 to 4 | Keeps the namespace's usage low when idle |
+| PodDisruptionBudget | None | This account can't create them |
 | Migration Job | `initContainer` | This account can't create Jobs |
 | NetworkPolicy on Postgres | None | This account can't create NetworkPolicies |
 | cert-manager | A private CA of our own | This account can't create Issuers or Certificates |
@@ -116,6 +117,32 @@ the client. The example accounts start as `pending_activation`, with no password
    ```
 4. Open the link, choose a password of at least 12 characters, and log in from the portal.
 
+## Scaling
+
+| Part | How it scales | Limit |
+|---|---|---|
+| `auth-server` | HPA: 2 to 4 pods at 70% of a 500m CPU request | Login is CPU-bound: about 6 logins/s per core, measured on an M1 (`docs/load-report.md`) |
+| `svc-impots`, `svc-cadastre` | HPA: 1 to 4 pods at 70% of a 100m CPU request | Tokens are checked locally, with no database call. With 1 pod, losing it interrupts that service until it's replaced |
+| `frontend` | Fixed at 2 pods | Static files |
+| Postgres | Doesn't scale | A single point of failure, though under 10% CPU in the load test |
+
+Watch it with:
+
+```sh
+kubectl get hpa -n n-grp7
+kubectl get pods -n n-grp7
+```
+
+`auth-server` `<unknown>` under `TARGETS` is normal for about a minute after its pods restart.
+
+**This has not been load-tested on the cluster.** The HPAs read real CPU values and report `ScalingActive`, but no real
+load has made them scale up, and the number of users the cluster can carry is unmeasured. A load test would compete with
+other groups on this shared cluster, so ask the admin first. It also needs activated test users, which the `runtime`
+image can't seed in bulk.
+
+**Rate limits may block users before CPU does:** logins are limited to 10 per minute per IP, so people sharing one public
+IP, such as a whole campus, share that limit however many pods are running.
+
 ## What was verified
 
 | Check | Result |
@@ -130,9 +157,14 @@ the client. The example accounts start as `pending_activation`, with no password
 | The mocks load the JWKS over verified TLS (`/health/ready` is 200) | Yes |
 | The activation request writes the link to the logs | Yes |
 | `auth-server` sees the real client IP, not the Ingress's | Yes |
+| HPAs read CPU metrics (`ScalingActive`) | Yes |
+| Deleting one of two `auth-server` pods, polling `/health/ready` | 86 of 86 requests succeeded |
+| Rolling restart of `auth-server`, polling `/health/ready` | With an 8 s client timeout, 41 of 41 succeeded, the slowest taking about 5.3 s. With a 5 s timeout, an earlier run lost 2 of 45 |
 
-**Not verified yet:** activating an account through the link, logging in through a browser, and a mock accepting a real
-token. `create-secrets.sh` also hasn't run from start to finish with its final `keyUsage` lines: the first run lacked
+**Browser test:** activation, login and a service page worked with 1 replica of each service. They haven't been repeated
+since scaling up.
+
+**Not verified yet:** `create-secrets.sh` also hasn't run from start to finish with its final `keyUsage` lines: the first run lacked
 them, and the certificates were then reissued by hand with the same options.
 
 ## Troubleshooting
@@ -155,7 +187,8 @@ them, because classes aren't validated. Your account can't list classes, so test
 ### `auth-server` in `Init:CrashLoopBackOff` with `Name or service not known`
 
 A headless Service has no DNS record until its pod is Ready, so the migration fails until Postgres is up. It recovers
-without any change, usually within a minute or two. Check with:
+without any change, usually within a minute or two. On a fresh database, two pods can also collide on the migration:
+migrations are transactional, so the loser should fail and retry (not tested). Check with:
 
 ```sh
 kubectl logs deploy/auth-server -c migrate -n n-grp7 --tail=20
@@ -208,6 +241,13 @@ kubectl create secret generic ghcr-pull -n n-grp7 --type=kubernetes.io/dockercon
 rm /tmp/ghcr.json
 ```
 
+### Requests stall for about 5 seconds during a rollout
+
+Some requests took about 5.3 s while `auth-server` pods were replaced, against 0.2 s normally. They most likely hit a pod
+that had just gone, until nginx's 5-second connect timeout moved them to the next one. That's inferred from the timing:
+the controller's logs aren't visible to this account. A client with a timeout of 5 s or less sees these as failures. A
+`preStop` sleep on the pods would be the usual way to reduce this; it isn't configured.
+
 ### `Forbidden` on events or on listing Jobs
 
 This account can't see them, so `kubectl get all` prints some `Forbidden` lines even when everything is fine. Use
@@ -223,6 +263,7 @@ This account can't see them, so `kubectl get all` prints some `Forbidden` lines 
   this account. Any pod in it could fake its client IP and get around per-IP rate limiting.
 - **Activation links are in the pod logs:** anyone who can read those logs can activate the example admin. Remove the
   example accounts when you've finished with them (their `external_id` starts with `example-`).
+- **Brief stalls during rollouts:** see [Troubleshooting](#troubleshooting).
 - **Self-signed certificate:** browsers warn once per hostname until the admin provides a cert-manager issuer.
 - **`/metrics` returns 200 with the SPA's page,** rather than a 404. It reveals nothing, but a scanner will see a 200.
 - **The address isn't secret:** it stays out of this repo and the registry, but visitors can read it in the served

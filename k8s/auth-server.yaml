@@ -13,9 +13,13 @@ kind: Deployment
 metadata:
   name: auth-server
 spec:
-  # ponytail: 1 replica, because every pod migrates in its initContainer and several could race. Jobs are forbidden
-  # in this namespace. Scale up once migrations run elsewhere.
-  replicas: 1
+  # No `replicas`: the HPA in autoscaling.yaml owns it. One new pod at a time, so each finishes its migration before the
+  # next starts. On a fresh database two pods can still collide: migrations are transactional, so the loser retries.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: auth-server
@@ -78,8 +82,8 @@ spec:
             httpGet: { path: /health/ready, port: 8000 }
             periodSeconds: 5
           resources:
-            requests: { cpu: 100m, memory: 256Mi }
-            limits: { memory: 512Mi } # Argon2 takes 64 MiB per login in progress
+            requests: { cpu: 500m, memory: 256Mi } # the HPA's percentages are of this CPU; a login is CPU-bound
+            limits: { memory: 1Gi } # Argon2 takes 64 MiB per login in progress, up to 8 at once on a 4-core node
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }
