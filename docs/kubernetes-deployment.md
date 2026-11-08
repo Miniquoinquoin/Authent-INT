@@ -241,6 +241,19 @@ kubectl create secret generic ghcr-pull -n n-grp7 --type=kubernetes.io/dockercon
 rm /tmp/ghcr.json
 ```
 
+### Login gets slow under load, then `connection refused`
+
+The namespace gives every container without its own CPU limit a limit of 500m, and `auth-server` doesn't declare one,
+so each pod gets half a core: about 1.7 logins/s. Under load, the pods are throttled, miss their 1 s readiness timeout,
+and drop out of the Service. Check with:
+
+```sh
+kubectl get pod -n n-grp7 -l app=auth-server -o jsonpath='{.items[0].spec.containers[0].resources.limits}'
+kubectl exec deploy/auth-server -c auth-server -n n-grp7 -- cat /sys/fs/cgroup/cpu.max
+```
+
+`50000 100000` means half a core. The load test that found this is in `docs/load-report.md`.
+
 ### Requests stall for about 5 seconds during a rollout
 
 Some requests took about 5.3 s while `auth-server` pods were replaced, against 0.2 s normally. They most likely hit a pod

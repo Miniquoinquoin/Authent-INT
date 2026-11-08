@@ -1,0 +1,51 @@
+# The load test on a cluster: docs/load-report.md. authentint.example is replaced at run time, as in k8s/.
+# activeDeadlineSeconds is a safety net: whatever happens, the load stops by itself.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: loadtest
+  labels:
+    app: loadtest
+    app.kubernetes.io/part-of: authent-int
+spec:
+  restartPolicy: Never
+  activeDeadlineSeconds: 900
+  enableServiceLinks: false
+  containers:
+    - name: k6
+      image: grafana/k6:1.3.0
+      args: ["run", "--no-usage-report", "/scripts/k6.js"]
+      env:
+        - { name: EDGE, value: "https://auth.authentint.example" }
+        - { name: DIRECT, value: "http://auth-server:8000" }
+        - { name: REDIRECT_URI, value: "https://app.authentint.example/callback" }
+        - { name: USERS_FILE, value: "/scripts/users.json" }
+        - { name: USERS, value: "200" }
+        - { name: DISCOVERY_RATE, value: "25" }
+        - { name: SSO_RATE, value: "30" }
+        - { name: SSO_START, value: "65" }
+        - { name: API_URL, value: "http://svc-impots:8001/dossiers" }
+        - { name: API_RATE, value: "100" }
+        - { name: API_START, value: "130" }
+        - { name: LOGIN_START, value: "255" }
+        - { name: LOGIN_STEPS, value: "2:45,5:45,10:45,20:180" }
+        - { name: ABORT_ON_ERRORS, value: "1" }
+        - { name: LABEL, value: "cluster" }
+        - name: PASSWORD
+          valueFrom:
+            secretKeyRef: { name: loadtest, key: PASSWORD }
+      resources:
+        requests: { cpu: 500m, memory: 256Mi }
+        limits: { cpu: "1", memory: 512Mi }
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: { drop: ["ALL"] }
+      volumeMounts:
+        - { name: scripts, mountPath: /scripts, readOnly: true }
+        - { name: results, mountPath: /results }
+  volumes:
+    - name: scripts
+      configMap:
+        name: loadtest
+    - name: results
+      emptyDir: {}
