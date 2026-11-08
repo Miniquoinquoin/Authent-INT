@@ -151,3 +151,102 @@ could not resolve `postgres` (`socket.gaierror`) and stayed unhealthy. The compo
 `--force-recreate` fixed it. The re-run of the check could not be done in this session. The k6 run
 at 3 replicas (above) did exercise tokens across replicas: 1801 codes exchanged with 0 errors,
 with requests spread round-robin over the 3.
+
+## Cluster run (namespace `n-grp7`, 2026-11-06)
+
+The same script against the Kubernetes deployment (`docs/kubernetes-deployment.md`), run from a pod inside the namespace
+(`load/k8s-pod.yaml`), with 200 temporary accounts (`load/k8s_users.py`). **Rate limits stayed on.** Logins, `/token` and
+the service API went straight to the Services, each iteration with its own `X-Forwarded-For`; only discovery went
+through the Ingress, because that controller is shared.
+
+| | |
+|---|---|
+| Cluster | RKE2, 5 nodes, shared with other groups |
+| auth-server | HPA 2 to 4 pods at 70% CPU, request 500m. **Effective CPU limit 500m** in the first run, 2 in the second |
+| svc-impots | HPA 1 to 4 pods at 70% CPU, request 100m, effective limit 500m |
+| k6 | `grafana/k6:1.3.0`, limited to 1 CPU |
+
+### First run: CPU limit 500m
+
+Latencies in ms. Logins are counted as completed out of the number the arrival rate asked for.
+
+| Step | Rate asked | Done | p50 | p95 | p99 | Errors |
+|---|---|---|---|---|---|---|
+| discovery (Ingress) | 50 req/s for 60 s | 3,002 req | 3.0 | 5.0 | 7.3 | 0 % |
+| sso `/authorize` | 30/s for 60 s | 1,801 | 7.2 | 9.7 | 11.2 | 0 % |
+| sso `/token` | 30/s for 60 s | 1,801 | 12.9 | 16.2 | 18.6 | 0 % |
+| api (`svc-impots`, real token) | 100/s for 120 s | 12,001 | 0.9 | 2.0 | 2.4 | 0 % |
+| login_2 | 90 | 91 | 329.6 | 403.7 | 407.5 | 0 % |
+| login_5 | 225 | 200 | 4,553 | 8,606 | 9,612 | 1.7 % |
+| login_10 | 450 | 352 | 7,320 | 13,501 | 21,210 | 1.0 % |
+| login_20 | 3,600 (180 s) | 1,360 | 14,095 | 31,703 | 35,638 | 8.0 % |
+
+2,203 iterations were dropped because k6 hit its 200 VUs. Almost every error was `connection refused` to `auth-server`
+(77 of 78), the other an i/o timeout.
+
+**Autoscaling:** `svc-impots` went from 1 to 2 pods during the api step, at about 105% of its request. `auth-server`
+reached 3 pods at 100% during the login steps. After the run, both returned to their minimums.
+
+### Interpretation
+
+**Token, discovery and service API traffic are fine.** No errors, p95 under 20 ms at these rates.
+
+**Login saturates from 5 logins/s, because of a CPU limit nobody declared.** The namespace has a LimitRange that gives
+every container without an explicit CPU limit a limit of 500m. `k8s/auth-server.yaml` declared a request but no limit, so
+each pod got half a core. Its cgroup showed `cpu.max 50000 100000` and about 26 minutes of throttling. At about 290 ms
+of CPU per login here, half a core is about 1.7 logins/s per pod, so even 4 pods top out near 7 logins/s.
+
+**The `connection refused` errors come from readiness.** Throttled pods answered `/health/ready` too slowly for its 1 s
+timeout, so Kubernetes marked them not Ready and took them out of the Service. Both pods turned Ready again at 16:54:42
+and 16:54:47 UTC, within seconds of the run ending. Nothing restarted.
+
+**Login looked slower than on the M1 (p50 330 ms at 2/s), but that was the throttling too:** 2 logins/s already needs more
+than half a core. With the limit fixed, a login takes about 180 ms, close to the M1's 160 ms.
+
+**The cluster was loaded less than expected:** with the 500m limits, `auth-server` could use at most about 2 cores.
+
+### Second run: CPU limit 2, readiness timeout 3 s
+
+`k8s/auth-server.yaml` now declares `limits.cpu: "2"` (a dry run showed the namespace accepts up to at least 4), and both
+probes wait 3 s instead of 1 s. Shorter run on 2026-11-08: discovery and sso at 5/s for 10 s, then the login steps.
+
+| Step | Rate asked | Done | p50 | p95 | p99 | Errors |
+|---|---|---|---|---|---|---|
+| login_5 | 225 | 225 | 175.3 | 193.0 | 202.4 | 0 % |
+| login_10 | 450 | 450 | 181.9 | 209.6 | 227.2 | 0 % |
+| login_20 | 1,800 (90 s) | 1,800 | 190.5 | 217.3 | 238.2 | 0 % |
+
+0 dropped iterations and 5,154 of 5,154 checks passed. `auth-server` scaled from 2 to 4 pods (3 at about 40 s into the
+10/s step, 4 at the start of 20/s) and held 4 at about 188% of its request, about 0.95 core per pod. No pod left the
+Service: each turned Ready once, when it started.
+
+**What it means:** 20 logins/s cost about 3.8 cores across 4 pods, with p95 latency close to a single Argon2. The HPA is at
+its maximum of 4 there, but each pod could still use up to 2 cores, so the ceiling is higher. A rough estimate, not
+measured, is around 40 logins/s, if the nodes have that much free CPU.
+
+### Gaps in the first run
+
+- **The safety stop didn't fire:** k6 aborts when more than 5% of *all* requests fail, and the api step's 12,000
+  successes diluted the login errors below that. The restart monitor didn't trigger either, because nothing restarted.
+  Neither was needed in the end, but neither would have caught this kind of failure.
+- **The Kubernetes API stopped answering the monitor** between about 16:48 and 16:52 UTC, the login steps, so the replica
+  timeline has a hole there. The cause wasn't visible to this account.
+- **Not measured:** the effect on other groups' workloads, and the real ceiling with the CPU limit fixed.
+
+### How to run it
+
+```sh
+D=$(cat k8s/secrets/domain); PW=$(openssl rand -hex 24)
+{ echo "ACTION='create'; PASSWORD='$PW'"; cat load/k8s_users.py; } | kubectl exec -i deploy/auth-server -c auth-server -n n-grp7 -- python -
+python3 -c 'import json; print(json.dumps([{"numero_fiscal": str(1910000000000+i)} for i in range(200)]))' > /tmp/users.json
+kubectl create secret generic loadtest -n n-grp7 --from-literal=PASSWORD="$PW"
+kubectl create configmap loadtest -n n-grp7 --from-file=k6.js=load/k6.js --from-file=users.json=/tmp/users.json
+sed "s/authentint\.example/$D/g" load/k8s-pod.yaml | kubectl apply -n n-grp7 -f -
+kubectl logs -f loadtest -n n-grp7
+
+# Afterwards
+{ echo "ACTION='disable'"; cat load/k8s_users.py; } | kubectl exec -i deploy/auth-server -c auth-server -n n-grp7 -- python -
+kubectl delete pod/loadtest configmap/loadtest secret/loadtest -n n-grp7
+```
+
+`--from-literal` puts the password on your command line; it's a throwaway one, disabled with the accounts.

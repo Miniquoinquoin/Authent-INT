@@ -19,16 +19,17 @@ import exec from 'k6/execution';
 import { check } from 'k6';
 import { SharedArray } from 'k6/data';
 
-const EDGE = 'https://auth.authentint.localhost';
-const DIRECT = 'http://auth-server:8000';
-const PASSWORD = 'Authentint-dev-1!'; // DEV ONLY: scripts/seed.py
+// Every default below is `make load`'s setup. load/k8s-pod.yaml overrides them for a cluster (docs/load-report.md).
+const EDGE = __ENV.EDGE || 'https://auth.authentint.localhost';
+const DIRECT = __ENV.DIRECT || 'http://auth-server:8000';
+const PASSWORD = __ENV.PASSWORD || 'Authentint-dev-1!'; // DEV ONLY: scripts/seed.py
 const N_USERS = Number(__ENV.USERS || 400);
 const USERS = new SharedArray('users', () =>
-  JSON.parse(open('/fixtures/users.json')).slice(0, N_USERS).map((u) => u.numero_fiscal));
+  JSON.parse(open(__ENV.USERS_FILE || '/fixtures/users.json')).slice(0, N_USERS).map((u) => u.numero_fiscal));
 
 // RFC 7636 appendix B: a fixed verifier/challenge pair is fine, each code is still single-use
 const VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
-const REDIRECT_URI = 'https://app.authentint.localhost/callback';
+const REDIRECT_URI = __ENV.REDIRECT_URI || 'https://app.authentint.localhost/callback';
 const AUTHORIZE = `${DIRECT}/authorize?` + [
   'response_type=code', 'client_id=portail-web', `redirect_uri=${encodeURIComponent(REDIRECT_URI)}`,
   `scope=${encodeURIComponent('openid svc:impots.read')}`, 'state=k6-state', 'nonce=k6-nonce',
@@ -38,10 +39,40 @@ const AUTHORIZE = `${DIRECT}/authorize?` + [
 const D = __ENV.DURATION || '60s';
 
 // One login scenario per rate: k6 then reports each rate's latency on its own
-function loginStep(rate, ipPrefix, startTime) {
-  return { [`login_${rate}`]: { executor: 'constant-arrival-rate', exec: 'login', rate, timeUnit: '1s', duration: '45s',
-                                preAllocatedVUs: 20, maxVUs: 200, startTime, env: { IP_PREFIX: String(ipPrefix) } } };
+function loginStep(rate, duration, ipPrefix, startTime) {
+  return { [`login_${rate}`]: { executor: 'constant-arrival-rate', exec: 'login', rate, timeUnit: '1s', duration: `${duration}s`,
+                                preAllocatedVUs: 20, maxVUs: 200, startTime: `${startTime}s`, env: { IP_PREFIX: String(ipPrefix) } } };
 }
+
+// "rate:seconds" per step, 5 s apart, from LOGIN_START
+const LOGIN_STEPS = (__ENV.LOGIN_STEPS || '2:45,5:45,10:45,20:45,40:45').split(',').map((step) => step.split(':').map(Number));
+const LOGIN_RATES = LOGIN_STEPS.map(([rate]) => rate);
+function loginScenarios() {
+  let start = Number(__ENV.LOGIN_START || 130);
+  return Object.assign({}, ...LOGIN_STEPS.map(([rate, duration], i) => {
+    const step = loginStep(rate, duration, 4 + i, start);
+    start += duration + 5;
+    return step;
+  }));
+}
+
+// Off unless API_RATE is set: calls a Resource Server with a real token, what a user's browser does on a service page
+const API_URL = __ENV.API_URL;
+const API_RATE = Number(__ENV.API_RATE || 0);
+const TOKEN_RENEW_MS = 5 * 60 * 1000; // access tokens last 10 minutes
+const apiScenario = API_RATE > 0 ? {
+  api: { executor: 'constant-arrival-rate', exec: 'api', rate: API_RATE, timeUnit: '1s', duration: __ENV.API_DURATION || '120s',
+         preAllocatedVUs: 50, maxVUs: 200, startTime: `${__ENV.API_START || 130}s` },
+} : {};
+const apiThresholds = API_RATE > 0 ? {
+  'http_req_failed{scenario:api}': ['rate<0.01'],
+  'http_req_duration{scenario:api,name:api}': ['p(95)<250'],
+  'http_reqs{scenario:api}': ['count>0'],
+} : {};
+// Off unless ABORT_ON_ERRORS is set: on a shared cluster, a failing run must stop adding load by itself
+const abortThreshold = __ENV.ABORT_ON_ERRORS ? {
+  http_req_failed: [{ threshold: 'rate<0.05', abortOnFail: true, delayAbortEval: '30s' }],
+} : {};
 
 export const options = {
   insecureSkipTLSVerify: true, // Caddy's internal CA (dev); the TLS handshake itself is still measured
@@ -51,10 +82,10 @@ export const options = {
     discovery: { executor: 'constant-arrival-rate', exec: 'discovery', rate: Number(__ENV.DISCOVERY_RATE || 100),
                  timeUnit: '1s', duration: D, preAllocatedVUs: 50, maxVUs: 200, startTime: '0s' },
     sso: { executor: 'constant-arrival-rate', exec: 'sso', rate: Number(__ENV.SSO_RATE || 30),
-           timeUnit: '1s', duration: D, preAllocatedVUs: 50, maxVUs: 200, startTime: '65s' },
+           timeUnit: '1s', duration: D, preAllocatedVUs: 50, maxVUs: 200, startTime: `${__ENV.SSO_START || 65}s` },
+    ...apiScenario,
     // Argon2 is the login's cost by design (ADR §14.3): three steps to see where latency starts to climb
-    ...loginStep(2, 4, '130s'), ...loginStep(5, 5, '180s'), ...loginStep(10, 6, '230s'),
-    ...loginStep(20, 7, '280s'), ...loginStep(40, 8, '330s'),
+    ...loginScenarios(),
   },
   // ms. Written before the first run; see docs/load-report.md for why these values
   thresholds: {
@@ -63,7 +94,9 @@ export const options = {
     'http_req_failed{scenario:sso}': ['rate<0.01'],
     'http_req_duration{scenario:sso,name:authorize}': ['p(95)<250'],
     'http_req_duration{scenario:sso,name:token}': ['p(95)<250'],
-    ...Object.fromEntries([2, 5, 10, 20, 40].flatMap((r) => [
+    ...apiThresholds,
+    ...abortThreshold,
+    ...Object.fromEntries(LOGIN_RATES.flatMap((r) => [
       [`http_req_failed{scenario:login_${r}}`, ['rate<0.01']],
       [`http_req_duration{scenario:login_${r},name:login}`, ['p(95)<1000']],
       [`http_req_duration{scenario:login_${r},name:authorize_no_session}`, ['max>=0']], // reported, not judged
@@ -118,6 +151,26 @@ export function sso(data) {
                                              redirect_uri: REDIRECT_URI, client_id: 'portail-web', code_verifier: VERIFIER },
                         { headers, tags: { name: 'token' } });
   check(tok, { 'token 200': (r) => r.status === 200 && !!r.json('access_token') });
+}
+
+let apiToken = null; // per VU
+let apiTokenAt = 0;
+
+export function api(data) {
+  if (!apiToken || Date.now() - apiTokenAt > TOKEN_RENEW_MS) {
+    const headers = { 'X-Forwarded-For': clientIp(3) };
+    const res = http.get(AUTHORIZE, { redirects: 0, tags: { name: 'api_authorize' },
+                                      headers: { ...headers, Cookie: `__Host-session=${data.session}` } });
+    const code = (/[?&]code=([^&]+)/.exec(res.headers.Location || '') || [])[1];
+    const tok = http.post(`${DIRECT}/token`, { grant_type: 'authorization_code', code: decodeURIComponent(code || ''),
+                                               redirect_uri: REDIRECT_URI, client_id: 'portail-web', code_verifier: VERIFIER },
+                          { headers, tags: { name: 'api_token' } });
+    if (!check(tok, { 'api token 200': (r) => r.status === 200 && !!r.json('access_token') })) return;
+    apiToken = tok.json('access_token');
+    apiTokenAt = Date.now();
+  }
+  const res = http.get(API_URL, { headers: { Authorization: `Bearer ${apiToken}` }, tags: { name: 'api' } });
+  check(res, { 'api 200': (r) => r.status === 200 });
 }
 
 export function login() {
