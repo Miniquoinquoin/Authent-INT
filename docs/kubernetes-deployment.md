@@ -121,7 +121,7 @@ the client. The example accounts start as `pending_activation`, with no password
 
 | Part | How it scales | Limit |
 |---|---|---|
-| `auth-server` | HPA: 2 to 4 pods at 70% of a 500m CPU request | Login is CPU-bound: about 6 logins/s per core, measured on an M1 (`docs/load-report.md`) |
+| `auth-server` | HPA: 2 to 4 pods at 70% of a 500m CPU request, each limited to 2 cores | Login is CPU-bound: 20 logins/s took 4 pods at about 0.95 core each, p95 217 ms (`docs/load-report.md`) |
 | `svc-impots`, `svc-cadastre` | HPA: 1 to 4 pods at 70% of a 100m CPU request | Tokens are checked locally, with no database call. With 1 pod, losing it interrupts that service until it's replaced |
 | `frontend` | Fixed at 2 pods | Static files |
 | Postgres | Doesn't scale | A single point of failure, though under 10% CPU in the load test |
@@ -135,10 +135,8 @@ kubectl get pods -n n-grp7
 
 `auth-server` `<unknown>` under `TARGETS` is normal for about a minute after its pods restart.
 
-**This has not been load-tested on the cluster.** The HPAs read real CPU values and report `ScalingActive`, but no real
-load has made them scale up, and the number of users the cluster can carry is unmeasured. A load test would compete with
-other groups on this shared cluster, so ask the admin first. It also needs activated test users, which the `runtime`
-image can't seed in bulk.
+**Load-tested up to 20 logins/s** (`docs/load-report.md`): 0 errors, and `auth-server` scaled from 2 to 4 pods. The real
+ceiling is unmeasured. A load test competes with other groups on this shared cluster, so warn them or the admin first.
 
 **Rate limits may block users before CPU does:** logins are limited to 10 per minute per IP, so people sharing one public
 IP, such as a whole campus, share that limit however many pods are running.
@@ -243,16 +241,17 @@ rm /tmp/ghcr.json
 
 ### Login gets slow under load, then `connection refused`
 
-The namespace gives every container without its own CPU limit a limit of 500m, and `auth-server` doesn't declare one,
-so each pod gets half a core: about 1.7 logins/s. Under load, the pods are throttled, miss their 1 s readiness timeout,
-and drop out of the Service. Check with:
+The namespace gives every container without its own CPU limit a limit of 500m. Before `k8s/auth-server.yaml` declared
+`limits.cpu: "2"`, each pod got half a core, about 1.7 logins/s: under load, the pods were throttled, missed their 1 s
+readiness timeout, and dropped out of the Service. If you see this again, check that the limit is really applied:
 
 ```sh
 kubectl get pod -n n-grp7 -l app=auth-server -o jsonpath='{.items[0].spec.containers[0].resources.limits}'
 kubectl exec deploy/auth-server -c auth-server -n n-grp7 -- cat /sys/fs/cgroup/cpu.max
 ```
 
-`50000 100000` means half a core. The load test that found this is in `docs/load-report.md`.
+`200000 100000` means 2 cores, and `50000 100000` half a core. The other containers still get the 500m default, which was
+enough in the load test (`docs/load-report.md`).
 
 ### Requests stall for about 5 seconds during a rollout
 

@@ -34,7 +34,10 @@ async def create(session) -> None:
             external_id=f"loadtest-{i}", numero_fiscal_hmac=numero_fiscal_digest(str(FIRST_NUMBER + i)),
             email=f"loadtest-{i}@authentint.example", nom="Loadtest", prenom=str(i), role=Role.contribuable,
             status=UserStatus.active, password_hash=password_hash, password_changed_at=func.now(),
-        ).on_conflict_do_nothing())
+        ).on_conflict_do_update(  # a rerun re-enables accounts an earlier `disable` left behind
+            index_elements=["external_id"],
+            set_={"status": UserStatus.active, "password_hash": password_hash, "password_changed_at": func.now()},
+        ))
 
 
 async def disable(session) -> None:

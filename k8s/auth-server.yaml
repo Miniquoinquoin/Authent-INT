@@ -75,15 +75,20 @@ spec:
                 secretKeyRef: { name: authentint-secrets, key: NUMERO_FISCAL_KEY }
           ports:
             - containerPort: 8000
+          # 3 s, not the default 1 s: a pod busy hashing answers late, and must not drop out of the Service for it
           livenessProbe:
             httpGet: { path: /health/live, port: 8000 }
             periodSeconds: 10
+            timeoutSeconds: 3
           readinessProbe:
             httpGet: { path: /health/ready, port: 8000 }
             periodSeconds: 5
+            timeoutSeconds: 3
           resources:
             requests: { cpu: 500m, memory: 256Mi } # the HPA's percentages are of this CPU; a login is CPU-bound
-            limits: { memory: 1Gi } # Argon2 takes 64 MiB per login in progress, up to 8 at once on a 4-core node
+            # Declared on purpose: without one, the namespace's LimitRange caps the pod at 500m, about 1.7 logins/s
+            # (docs/load-report.md). Argon2 takes 64 MiB per login in progress, one per executor thread.
+            limits: { cpu: "2", memory: 1Gi }
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }

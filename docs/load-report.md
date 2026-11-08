@@ -162,11 +162,11 @@ through the Ingress, because that controller is shared.
 | | |
 |---|---|
 | Cluster | RKE2, 5 nodes, shared with other groups |
-| auth-server | HPA 2 to 4 pods at 70% CPU, request 500m. **Effective CPU limit 500m**, see below |
+| auth-server | HPA 2 to 4 pods at 70% CPU, request 500m. **Effective CPU limit 500m** in the first run, 2 in the second |
 | svc-impots | HPA 1 to 4 pods at 70% CPU, request 100m, effective limit 500m |
 | k6 | `grafana/k6:1.3.0`, limited to 1 CPU |
 
-### Results
+### First run: CPU limit 500m
 
 Latencies in ms. Logins are counted as completed out of the number the arrival rate asked for.
 
@@ -200,18 +200,38 @@ of CPU per login here, half a core is about 1.7 logins/s per pod, so even 4 pods
 timeout, so Kubernetes marked them not Ready and took them out of the Service. Both pods turned Ready again at 16:54:42
 and 16:54:47 UTC, within seconds of the run ending. Nothing restarted.
 
-**One login costs about 290 ms here,** against about 160 ms on the M1 in the first run (login_2: p50 330 ms).
+**Login looked slower than on the M1 (p50 330 ms at 2/s), but that was the throttling too:** 2 logins/s already needs more
+than half a core. With the limit fixed, a login takes about 180 ms, close to the M1's 160 ms.
 
 **The cluster was loaded less than expected:** with the 500m limits, `auth-server` could use at most about 2 cores.
 
-### Gaps in this run
+### Second run: CPU limit 2, readiness timeout 3 s
+
+`k8s/auth-server.yaml` now declares `limits.cpu: "2"` (a dry run showed the namespace accepts up to at least 4), and both
+probes wait 3 s instead of 1 s. Shorter run on 2026-11-08: discovery and sso at 5/s for 10 s, then the login steps.
+
+| Step | Rate asked | Done | p50 | p95 | p99 | Errors |
+|---|---|---|---|---|---|---|
+| login_5 | 225 | 225 | 175.3 | 193.0 | 202.4 | 0 % |
+| login_10 | 450 | 450 | 181.9 | 209.6 | 227.2 | 0 % |
+| login_20 | 1,800 (90 s) | 1,800 | 190.5 | 217.3 | 238.2 | 0 % |
+
+0 dropped iterations and 5,154 of 5,154 checks passed. `auth-server` scaled from 2 to 4 pods (3 at about 40 s into the
+10/s step, 4 at the start of 20/s) and held 4 at about 188% of its request, about 0.95 core per pod. No pod left the
+Service: each turned Ready once, when it started.
+
+**What it means:** 20 logins/s cost about 3.8 cores across 4 pods, with p95 latency close to a single Argon2. The HPA is at
+its maximum of 4 there, but each pod could still use up to 2 cores, so the ceiling is higher. A rough estimate, not
+measured, is around 40 logins/s, if the nodes have that much free CPU.
+
+### Gaps in the first run
 
 - **The safety stop didn't fire:** k6 aborts when more than 5% of *all* requests fail, and the api step's 12,000
   successes diluted the login errors below that. The restart monitor didn't trigger either, because nothing restarted.
   Neither was needed in the end, but neither would have caught this kind of failure.
 - **The Kubernetes API stopped answering the monitor** between about 16:48 and 16:52 UTC, the login steps, so the replica
   timeline has a hole there. The cause wasn't visible to this account.
-- **Not measured:** the effect on other groups' workloads, and capacity with the CPU limit fixed.
+- **Not measured:** the effect on other groups' workloads, and the real ceiling with the CPU limit fixed.
 
 ### How to run it
 
